@@ -1,0 +1,11 @@
+{
+  "source": "website_form",
+  "source_id": "WF-1000010",
+  "first_name": "Leila",
+  "last_name": "Benjelloun",
+  "phone": "+212661234567",
+  "email": "leila.benjelloun@example.ma",
+  "property_interest": "riad",
+  "area_of_interest": "Marrakech, Médina",
+  "message": "Bonjour, j'envisage de vendre mon riad dans la médina de Marrakech cette année. J'aimerais avoir une estimation et comprendre le marché actuel."
+}

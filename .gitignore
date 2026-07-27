@@ -1,0 +1,36 @@
+# ── Internal / sensitive — NOT for the public portfolio repo ─────────────────
+# Reasons: live secrets, credential IDs, internal pricing, and working notes.
+#
+# docs/decisions.md      contains a live webhook token + n8n credential IDs
+# docs/testing-log.md    internal QA notes + instance references
+# docs/hubspot-setup.md  HubSpot portal IDs + internal setup steps
+# docs/linkedin-posts.md marketing drafts (not repo content)
+# CLAUDE.md              internal working standards + personal tooling references
+# PLAN.md                internal build playbook (credential IDs, deferred notes)
+# case-study-1-mena-spec.md  contains rate-card / pricing (business-sensitive)
+#
+# If you want the rigor showcases public, ask for REDACTED copies of
+# decisions.md / testing-log.md instead of un-ignoring these.
+docs/decisions.md
+docs/testing-log.md
+docs/hubspot-setup.md
+docs/linkedin-posts.md
+CLAUDE.md
+PLAN.md
+case-study-1-mena-spec.md
+
+# ── Secrets (belt-and-suspenders) ────────────────────────────────────────────
+.env
+.env.*
+*.pem
+*secret*
+*credentials*
+
+# ── OS / editor cruft ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.idea/
+.vscode/

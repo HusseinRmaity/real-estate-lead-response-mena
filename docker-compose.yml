@@ -1,0 +1,31 @@
+# Case Study 1 — n8n runtime (Milestone 1, step 1.2)
+#
+# This file DOCUMENTS the already-running n8n instance for reproducibility.
+# It adopts the existing external Docker volume `N8N_DATA` (SQLite storage) so
+# there is NO data loss and your other workflows stay intact.
+#
+# DO NOT run this while the manually-started `N8N` container is already up —
+# it will clash on port 5678 and the container name. To switch to compose-managed:
+#   1) docker stop N8N && docker rm N8N       # keeps the N8N_DATA volume
+#   2) docker compose up -d                    # re-attaches the same volume
+#
+# Single-instance demo: SQLite (the n8n default, inside N8N_DATA) is sufficient.
+# We deliberately do NOT add a separate Postgres backend for n8n's own state —
+# unnecessary for one instance and out of scope for this portfolio build.
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: N8N
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=Asia/Beirut
+      - TZ=Asia/Beirut
+    volumes:
+      - N8N_DATA:/home/node/.n8n
+
+volumes:
+  N8N_DATA:
+    external: true

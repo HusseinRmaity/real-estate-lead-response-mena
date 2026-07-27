@@ -1,0 +1,1451 @@
+[
+  {
+    "updatedAt": "2026-07-26T20:12:05.700Z",
+    "createdAt": "2026-07-26T05:42:03.033Z",
+    "id": "bszGjvdHoOOWD4z2",
+    "name": "01 - Lead Intake",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "lead-intake",
+          "authentication": "headerAuth",
+          "options": {
+            "responseCode": {
+              "values": {}
+            },
+            "responseData": "{\"status\":\"received\"}",
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ]
+            }
+          }
+        },
+        "id": "webhook-lead-intake",
+        "name": "Receive Lead Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          0,
+          304
+        ],
+        "webhookId": "cs1-lead-intake",
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "zDwq5uvCPkF4DqRw",
+            "name": "Lead Intake Webhook Token - Case 1"
+          }
+        },
+        "notes": "POST /lead-intake. Header-token auth (x-webhook-token) => bad/missing token returns 401 before the workflow runs. responseMode=onReceived returns 200 {status:received} immediately so the lead source never waits on processing (spec §5.01)."
+      },
+      {
+        "parameters": {
+          "jsCode": "const b = $json.body || {};\nconst src = (b.source ?? '').toString().trim();\nconst phone = (b.phone ?? '').toString().trim();\nconst email = (b.email ?? '').toString().trim();\nconst errors = [];\nif (!src) errors.push('missing source');\nconst hasPhone = phone !== '';\nconst hasEmail = email !== '';\nif (!hasPhone && !hasEmail) errors.push('missing both phone and email');\nconst e164 = /^\\+[1-9]\\d{7,14}$/;\nif (hasPhone && !e164.test(phone)) errors.push('phone not valid E.164');\nconst _valid = errors.length === 0;\nreturn [{ json: {\n  source: src || null,\n  source_id: (b.source_id ?? null),\n  first_name: (b.first_name ?? null),\n  last_name: (b.last_name ?? null),\n  phone: phone || null,\n  email: email || null,\n  property_interest: (b.property_interest ?? null),\n  area_of_interest: (b.area_of_interest ?? null),\n  message: (b.message ?? null),\n  _valid,\n  _reason: errors.join('; ')\n} }];"
+        },
+        "id": "validate-fields",
+        "name": "Validate Required Fields",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          240,
+          304
+        ],
+        "notes": "Entry validation (spec §8.2). Requires: source, at least one of phone/email, and E.164 phone when a phone is given. Flattens body -> top-level fields for downstream expressions."
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "cond-valid",
+                "leftValue": "={{ $json._valid }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "route-valid",
+        "name": "Route Valid vs Malformed",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          480,
+          304
+        ],
+        "notes": "TRUE => valid, continue pipeline. FALSE => malformed, log and exit. Malformed never hits the happy path (spec §8.2)."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ workflow_name: '01 - Lead Intake', execution_id: $execution.id, status: 'failed', step_name: 'validate', error_message: $json._reason, metadata: { source: $json.source, has_phone: !!$json.phone, has_email: !!$json.email } }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "id": "log-malformed",
+        "name": "Log Malformed Lead",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          480,
+          560
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Observability: records the malformed lead in run_logs (status=failed) then the branch ends. onError=continue so a logging outage never masks the real reject decision."
+      },
+      {
+        "parameters": {
+          "jsCode": "const j = $json;\nconst phone_norm = (j.phone ?? '').toString().replace(/\\D/g, '');\nconst email_norm = (j.email ?? '').toString().toLowerCase().trim();\nconst source = (j.source ?? '').toString();\nconst prefixes = [['971','AE'],['966','SA'],['974','QA'],['965','KW'],['973','BH'],['968','OM'],['212','MA'],['961','LB'],['962','JO'],['20','EG']];\nlet country_code = null;\nfor (const [p, iso] of prefixes) { if (phone_norm.startsWith(p)) { country_code = iso; break; } }\nconst dedup_source_string = phone_norm + '|' + email_norm + '|' + source;\nreturn [{ json: { ...j, phone_norm, email_norm, country_code, dedup_source_string } }];"
+        },
+        "id": "normalize-dedup",
+        "name": "Normalize Dedup Input",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          720,
+          304
+        ],
+        "notes": "Normalizes phone (digits only) + email (lowercase/trim) so cosmetic differences don't defeat dedup. Builds the source string the Crypto node hashes. Also sets a coarse country_code from the dial prefix."
+      },
+      {
+        "parameters": {
+          "value": "={{ $json.dedup_source_string }}",
+          "dataPropertyName": "dedup_key"
+        },
+        "id": "compute-dedup-key",
+        "name": "Compute Dedup Key",
+        "type": "n8n-nodes-base.crypto",
+        "typeVersion": 2,
+        "position": [
+          960,
+          304
+        ],
+        "notes": "dedup_key = SHA256(phone_norm | email_norm | source), hex. Deterministic: same lead+source => same key => UNIQUE constraint enforces idempotency (spec §8.3). Different source => different key (distinct leads)."
+      },
+      {
+        "parameters": {
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "dedup_key",
+                "value": "=eq.{{ $json.dedup_key }}"
+              },
+              {
+                "name": "created_at",
+                "value": "=gte.{{ $now.minus({ hours: 72 }).toISO() }}"
+              },
+              {
+                "name": "select",
+                "value": "id"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "id": "check-duplicate",
+        "name": "Check Duplicate Against Supabase",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1200,
+          304
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "72h lookback dedup query. fullResponse+neverError => body is the array of matches (empty = fresh). onError=continue so a check failure FAILS SAFE toward insert (the UNIQUE constraint is the real guard). 72h window = same lead later is a new inquiry (spec decision 8)."
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "cond-dup",
+                "leftValue": "={{ $json.body && Array.isArray($json.body) && $json.body.length > 0 }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "route-duplicate",
+        "name": "Route If Duplicate",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          1440,
+          304
+        ],
+        "notes": "TRUE => an active lead with this dedup_key exists within 72h => update existing + log, do NOT insert. FALSE => fresh lead, continue to classification."
+      },
+      {
+        "parameters": {
+          "jsCode": "const lead = $('Compute Dedup Key').item.json;\nconst msg = (lead.message || '').toString();\nconst system = [\n 'You are a language detector for a real-estate lead-response system serving the MENA region.',\n 'Determine the DOMINANT language of the message. Allowed values:',\n '- \"ar\" Arabic (any dialect, Arabic script OR Latin/Arabizi like \"3ayez\", \"keefak\").',\n '- \"en\" English',\n '- \"fr\" French',\n '- \"mixed\" two or more used roughly equally, no single dominant one.',\n 'Rules: place/project names do NOT count toward a language. Arabizi counts as \"ar\".',\n 'If one language carries the meaning and the other is only a name/loanword, pick the dominant one, not \"mixed\".',\n 'Output STRICT JSON only, no prose/markdown/fences. Shape: {\"language\":\"ar|en|fr|mixed\",\"confidence\":0.0-1.0}'\n].join('\\n');\nconst body = { model: 'claude-haiku-4-5-20251001', max_tokens: 60, system, messages: [{ role: 'user', content: 'Message:\\n\"\"\"\\n' + msg + '\\n\"\"\"' }] };\nreturn [{ json: { anthropic_body: body } }];"
+        },
+        "id": "build-language-request",
+        "name": "Build Language Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1680,
+          304
+        ],
+        "notes": "Builds the Haiku language-detection request (prompts/language-detector.md v1) in JS so the multi-line system prompt stays readable. Passes it to the HTTP node as anthropic_body."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "anthropicApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.anthropic_body) }}",
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "id": "detect-language",
+        "name": "Detect Language (Haiku)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1920,
+          304
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1500,
+        "alwaysOutputData": true,
+        "credentials": {
+          "anthropicApi": {
+            "id": "azRjMcNgGfj9c985",
+            "name": "Anthropic account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Haiku 4.5 language detection. onError=continue + alwaysOutputData => on failure the item still flows; Assemble Lead Row falls back to the country heuristic. 15s timeout, 2 retries. Cheap (~$0.0003/call)."
+      },
+      {
+        "parameters": {
+          "jsCode": "const lead = $('Compute Dedup Key').item.json;\nconst system = [\n 'You classify inbound real-estate leads for MENA agencies. Assign ONE intent level.',\n '- \"high\" ready-to-transact: cash/pre-approved, specific building/unit, near-term timeline, request to view.',\n '- \"medium\" genuine but exploratory: named area/type without firm budget/timeline.',\n '- \"low\" casual browsing: vague, no area, no timeline.',\n '- \"junk\" spam, fake identity (nonsense name/random digits), tests, bots, unrelated.',\n 'Rules: judge substance not politeness. Fake name + no real interest => junk.',\n 'Currency is never assumed; a bare number is not a strong budget signal.',\n 'Consider Arabic (incl Arabizi), English, French equally.',\n 'Output STRICT JSON only. Shape: {\"intent\":\"high|medium|low|junk\",\"reason\":\"<=12 words\"}'\n].join('\\n');\nconst user = [\n 'Lead data:',\n '- source: ' + (lead.source || ''),\n '- name: ' + ((lead.first_name || '') + ' ' + (lead.last_name || '')).trim(),\n '- property_interest: ' + (lead.property_interest || ''),\n '- area: ' + (lead.area_of_interest || ''),\n '- message: ' + (lead.message || '')\n].join('\\n');\nconst body = { model: 'claude-haiku-4-5-20251001', max_tokens: 80, system, messages: [{ role: 'user', content: user }] };\nreturn [{ json: { anthropic_body: body } }];"
+        },
+        "id": "build-intent-request",
+        "name": "Build Intent Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2160,
+          304
+        ],
+        "notes": "Builds the Haiku intent-classification request (prompts/intent-classifier.md v1). Pulls lead fields from Compute Dedup Key (the HTTP nodes overwrite $json with their own response)."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "anthropicApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.anthropic_body) }}",
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "id": "classify-intent",
+        "name": "Classify Intent (Haiku)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2400,
+          304
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true,
+        "credentials": {
+          "anthropicApi": {
+            "id": "azRjMcNgGfj9c985",
+            "name": "Anthropic account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Haiku 4.5 intent classification. 15s timeout, 3 retries. onError=continue => Assemble Lead Row defaults intent to 'medium' and marks the run 'partial' rather than dropping the lead (spec §8.1 degraded path)."
+      },
+      {
+        "parameters": {
+          "jsCode": "const lead = $('Compute Dedup Key').item.json;\n\nfunction extractJson(text) {\n  let t = (text || '').toString().trim();\n  const m = t.match(/\\{[\\s\\S]*\\}/);\n  if (m) t = m[0];\n  return JSON.parse(t);\n}\n\nconst gcc = ['AE','SA','QA','KW','BH','OM','EG'];\nlet language = gcc.includes(lead.country_code) ? 'ar' : 'en';\nlet langSource = 'heuristic';\ntry {\n  const r = $('Detect Language (Haiku)').item.json;\n  if (r && !r.error && Array.isArray(r.content) && r.content[0] && r.content[0].text) {\n    const p = extractJson(r.content[0].text);\n    if (['ar','en','fr','mixed'].includes(p.language)) { language = p.language; langSource = 'ai'; }\n  }\n} catch (e) {}\n\nlet intent = 'medium';\nlet intentDegraded = true;\ntry {\n  const r = $('Classify Intent (Haiku)').item.json;\n  if (r && !r.error && Array.isArray(r.content) && r.content[0] && r.content[0].text) {\n    const p = extractJson(r.content[0].text);\n    if (['high','medium','low','junk'].includes(p.intent)) { intent = p.intent; intentDegraded = false; }\n  }\n} catch (e) {}\n\nconst row = {\n  source: lead.source || null,\n  source_id: lead.source_id || null,\n  first_name: lead.first_name || null,\n  last_name: lead.last_name || null,\n  phone: lead.phone || null,\n  email: lead.email || null,\n  property_interest: lead.property_interest || null,\n  area_of_interest: lead.area_of_interest || null,\n  language,\n  country_code: lead.country_code || null,\n  intent_classification: intent,\n  dedup_key: lead.dedup_key,\n  status: 'new'\n};\nreturn [{ json: { row, _language_source: langSource, _intent_degraded: intentDegraded } }];"
+        },
+        "id": "assemble-lead-row",
+        "name": "Assemble Lead Row",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2640,
+          304
+        ],
+        "notes": "Merges lead data + parsed AI results into the exact leads-row shape. Language falls back to a country heuristic; intent falls back to 'medium' (marking the run partial). No throw path here — always produces an insertable row."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=representation"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.row) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "insert-lead",
+        "name": "Insert Lead Into Supabase",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2880,
+          304
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Inserts the lead. return=representation => body is [ {row} ] with id. neverError => a 409 unique_violation (race) comes back as data, not a throw, and Route Insert Result sends it to the Update path (spec §8.3 idempotency)."
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "cond-insert-ok",
+                "leftValue": "={{ $json.body && Array.isArray($json.body) && $json.body[0] && $json.body[0].id ? true : false }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "route-insert",
+        "name": "Route Insert Result",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          3120,
+          304
+        ],
+        "notes": "TRUE => insert returned a new row id => log success. FALSE => conflict/failure => treat as duplicate race, update existing + log."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ workflow_name: '01 - Lead Intake', execution_id: $execution.id, lead_id: $json.body[0].id, status: ($('Assemble Lead Row').item.json._intent_degraded ? 'partial' : 'success'), step_name: 'insert_lead', metadata: { intent: $('Assemble Lead Row').item.json.row.intent_classification, language: $('Assemble Lead Row').item.json.row.language, language_source: $('Assemble Lead Row').item.json._language_source, country_code: $('Assemble Lead Row').item.json.row.country_code, source: $('Assemble Lead Row').item.json.row.source, message: $('Compute Dedup Key').item.json.message } }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "id": "log-success",
+        "name": "Log Run Success",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3360,
+          304
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Terminal success log. status=partial when the intent call degraded to the 'medium' fallback, else success. Captures the AI outputs for the observability trail (spec §8.4)."
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "dedup_key",
+                "value": "=eq.{{ $('Compute Dedup Key').item.json.dedup_key }}"
+              }
+            ]
+          },
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ updated_at: $now.toISO() }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "id": "update-existing",
+        "name": "Update Existing Lead",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1440,
+          560
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Duplicate within 72h (or insert race): touch updated_at on the existing row instead of inserting a second one. Makes the re-inquiry visible without duplicating the lead."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ workflow_name: '01 - Lead Intake', execution_id: $execution.id, status: 'success', step_name: 'dedup', metadata: { dedup_key: $('Compute Dedup Key').item.json.dedup_key, note: 'duplicate within 72h window — updated existing lead, no new row' } }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "id": "log-duplicate",
+        "name": "Log Duplicate",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1680,
+          560
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Terminal dedup log. Records that a duplicate was collapsed onto the existing lead (spec §8.3/8.4)."
+      },
+      {
+        "id": "82f221e7-49fe-439c-a661-bffcb3c3fcff",
+        "name": "Route By Intent",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          3360,
+          120
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "conditions": [
+              {
+                "id": "cond-high-medium",
+                "leftValue": "={{ ['high','medium'].includes($json.body && $json.body[0] ? $json.body[0].intent_classification : '') }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          }
+        },
+        "notes": "high/medium => send WhatsApp acknowledgment. low (nurture, no message) / junk (mark + exit) => straight to Log Run Success, no send (spec §5.01)."
+      },
+      {
+        "id": "e799ca59-a874-41dd-ba94-f19a2ade949b",
+        "name": "Get Send Config",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3560,
+          120
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/send_windows",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "country_code",
+                "value": "=eq.{{ $('Compute Dedup Key').item.json.country_code }}"
+              },
+              {
+                "name": "select",
+                "value": "*"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 10000,
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            }
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "notes": "Fetch the lead country send-window config (timezone, weekend_days, quiet hours, respect_prayer_times). fullResponse+neverError => body is the row array (empty if country unseeded); Resolve Send Context defaults to AE if missing.",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "fb19a03c-3043-415f-b0f7-a7faad7707f1",
+        "name": "Resolve Send Context",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3760,
+          120
+        ],
+        "parameters": {
+          "jsCode": "const lead = $('Compute Dedup Key').item.json;\n\nlet sw = null;\ntry {\n  const arr = ($json && $json.body) ? $json.body : (Array.isArray($json) ? $json : null);\n  if (Array.isArray(arr) && arr[0]) sw = arr[0];\n} catch (e) {}\n\nconst DEFAULT = { country_code: 'AE', timezone: 'Asia/Dubai', weekend_days: [5,6], quiet_hours_start: '22:00:00', quiet_hours_end: '08:00:00', respect_prayer_times: true };\nconst cfg = sw || DEFAULT;\nconst cc = cfg.country_code || 'AE';\n\nconst PRAYER = {\n  AE:{city:'Dubai',country:'United Arab Emirates',method:16},\n  SA:{city:'Riyadh',country:'Saudi Arabia',method:4},\n  QA:{city:'Doha',country:'Qatar',method:10},\n  KW:{city:'Kuwait City',country:'Kuwait',method:9},\n  BH:{city:'Manama',country:'Bahrain',method:8},\n  OM:{city:'Muscat',country:'Oman',method:4},\n  EG:{city:'Cairo',country:'Egypt',method:5},\n  JO:{city:'Amman',country:'Jordan',method:23},\n  LB:{city:'Beirut',country:'Lebanon',method:2},\n  MA:{city:'Casablanca',country:'Morocco',method:21}\n};\nconst prayer = PRAYER[cc] || PRAYER.AE;\nconst tz = cfg.timezone || 'Asia/Dubai';\nconst now = DateTime.now().setZone(tz);\n\nconst weekendDays = Array.isArray(cfg.weekend_days) ? cfg.weekend_days : [5,6];\nconst dow = now.weekday % 7; // Luxon Mon=1..Sun=7 -> JS Sun=0..Sat=6\nconst isWeekend = weekendDays.includes(dow);\n\nfunction hm(t){ const p = (t || '00:00').toString().split(':'); return { h: parseInt(p[0]||'0',10), m: parseInt(p[1]||'0',10) }; }\nconst qs = hm(cfg.quiet_hours_start);\nconst qe = hm(cfg.quiet_hours_end);\nconst sMin = qs.h*60 + qs.m;\nconst eMin = qe.h*60 + qe.m;\nconst nMin = now.hour*60 + now.minute;\nlet inQuiet;\nif (sMin > eMin) inQuiet = (nMin >= sMin || nMin < eMin);\nelse inQuiet = (nMin >= sMin && nMin < eMin);\n\nfunction nextOpen(d){\n  let cand = d.set({ hour: qe.h, minute: qe.m, second: 0, millisecond: 0 });\n  if (d > cand) cand = cand.plus({ days: 1 });\n  let guard = 0;\n  while (weekendDays.includes(cand.weekday % 7) && guard < 9){\n    cand = cand.plus({ days: 1 }).set({ hour: qe.h, minute: qe.m, second: 0, millisecond: 0 });\n    guard++;\n  }\n  return cand;\n}\n\nconst resume = (!isWeekend && !inQuiet) ? now : nextOpen(now);\n\nlet wa = (lead.phone || '').toString().replace(/[^\\d+]/g, '');\nif (wa && wa[0] !== '+') wa = '+' + wa;\n\nreturn [{ json: {\n  whatsapp_number: wa,\n  timezone: tz,\n  country_code: cc,\n  respect_prayer_times: cfg.respect_prayer_times !== false,\n  prayer_city: prayer.city,\n  prayer_country: prayer.country,\n  prayer_method: prayer.method,\n  is_weekend: isWeekend,\n  in_quiet_hours: inQuiet,\n  send_window_delayed: resume.toMillis() > now.toMillis() + 1000,\n  send_window_resume: resume.toISO(),\n  now_local: now.toISO()\n} }];"
+        },
+        "notes": "Send-window math in the lead local timezone (Luxon, bundled — no npm). Reads send_windows row (or AE default). Computes weekend/quiet-hours and the next valid 08:00 open; send_window_resume = now when already in-window. Also derives whatsapp_number (E.164) and per-country prayer city/method. Deviation: timezone via send_windows lookup, not libphonenumber (see decisions.md)."
+      },
+      {
+        "id": "fbfc3c9e-b338-452a-924e-074a407499c3",
+        "name": "Wait For Send Window",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          3960,
+          120
+        ],
+        "parameters": {
+          "resume": "specificTime",
+          "dateTime": "={{ $json.send_window_resume }}"
+        },
+        "notes": "Suspends until the country send-window opens (weekend / 22:00-08:00 quiet hours). A past/now time resumes immediately. Safe to suspend: the webhook already returned 200 (responseMode onReceived).",
+        "webhookId": "e24003c1-14d7-4193-aed7-e4415ec26c40"
+      },
+      {
+        "id": "b3252b05-0a84-4b1f-a1a9-fb78e15da44b",
+        "name": "Get Prayer Times",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          4160,
+          120
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "=https://api.aladhan.com/v1/timingsByCity/{{ $now.setZone($json.timezone).toFormat('dd-LL-yyyy') }}",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "city",
+                "value": "={{ $json.prayer_city }}"
+              },
+              {
+                "name": "country",
+                "value": "={{ $json.prayer_country }}"
+              },
+              {
+                "name": "method",
+                "value": "={{ $json.prayer_method }}"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 10000,
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            }
+          }
+        },
+        "notes": "Aladhan prayer timings for the lead city + today (fetched AFTER the send-window wait so the date is correct). Free, no auth. neverError + onError=continue => an outage skips the prayer check and never blocks the send (spec §7).",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "414929ea-3d4e-486c-9cef-25ef69d956b5",
+        "name": "Resolve Prayer Delay",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4360,
+          120
+        ],
+        "parameters": {
+          "jsCode": "const ctx = $('Resolve Send Context').item.json;\nconst now = DateTime.now().setZone(ctx.timezone);\nlet prayerCheck = 'ok';\nlet delayed = false;\nlet resume = now;\n\nif (ctx.respect_prayer_times === false) {\n  prayerCheck = 'skipped_country';\n} else {\n  let timings = null;\n  try {\n    const data = ($json && $json.body) ? $json.body : $json;\n    if (data && data.data && data.data.timings) timings = data.data.timings;\n  } catch (e) {}\n  if (!timings) {\n    prayerCheck = 'unavailable';\n  } else {\n    const names = ['Fajr','Dhuhr','Asr','Maghrib','Isha'];\n    for (const n of names) {\n      const t = timings[n];\n      if (!t) continue;\n      const parts = t.toString().slice(0,5).split(':');\n      const pt = now.set({ hour: parseInt(parts[0],10), minute: parseInt(parts[1],10), second: 0, millisecond: 0 });\n      if (Math.abs(now.diff(pt, 'minutes').minutes) <= 15) { delayed = true; break; }\n    }\n    if (delayed) { resume = now.plus({ minutes: 30 }); prayerCheck = 'delayed'; }\n  }\n}\n\nreturn [{ json: {\n  prayer_check: prayerCheck,\n  prayer_delayed: delayed,\n  prayer_resume: resume.toISO()\n} }];"
+        },
+        "notes": "If within 15 min of any of the 5 prayers (and the country respects prayer times), delay the send 30 min. LB is skipped_country (religiously mixed, decisions.md). API outage => prayer_check='unavailable', no delay, run marked partial downstream."
+      },
+      {
+        "id": "467fb1f3-ed3f-49e4-bdb8-1ad8fee6ae0d",
+        "name": "Wait For Prayer",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          4560,
+          120
+        ],
+        "parameters": {
+          "resume": "specificTime",
+          "dateTime": "={{ $json.prayer_resume }}"
+        },
+        "notes": "Suspends 30 min when the send lands inside a prayer window; otherwise resumes immediately (prayer_resume = now).",
+        "webhookId": "f58bbeb9-b065-41d3-a081-5d912017bfb2"
+      },
+      {
+        "id": "84e448d3-2e5f-4b68-a6fb-be76f42f474a",
+        "name": "Build Acknowledgment Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4760,
+          120
+        ],
+        "parameters": {
+          "jsCode": "const lead = $('Compute Dedup Key').item.json;\nconst row = $('Assemble Lead Row').item.json.row;\nconst language = row.language || 'en';\n\nconst system = [\n 'You write the FIRST WhatsApp message a MENA real-estate agency sends to a new lead, within seconds of their enquiry. It must feel like a real, attentive human agent, not a bot and not a marketing blast.',\n 'Write ONE message, in the language given (ar | en | fr | mixed). For mixed, lead in Arabic. Match the country natural dialect register.',\n 'The message MUST: (1) greet by first name if provided; (2) acknowledge their SPECIFIC stated interest (property type / area / buy or sell) so it is clearly personal; (3) end with EXACTLY ONE clear qualifying question (budget, and ask which currency, never assume; or timeline; or area; or buyer vs seller).',\n 'Cultural rules (non-negotiable): formality by tone. A short casual or emoji enquiry uses informal Arabic anta (أنت); a formal, business, or older tone uses respectful hadretak (حضرتك); when unsure lean respectful. NEVER use in-sha-Allah (إن شاء الله) for logistics or timing, use we will do our best (سنبذل قصارى جهدنا). No religious greeting that assumes a religion, use neutral marhaba / Hello / Bonjour. Currency is never assumed.',\n 'Style: under 500 characters, WhatsApp not email, no signature block, at most one tasteful emoji and only if it fits the lead tone (default none), no dream-home hype. Output ONLY the message text: no quotes, no JSON, no code fences.'\n].join('\\n');\n\nconst user = [\n 'Lead:',\n '- first_name: ' + (lead.first_name || ''),\n '- language: ' + language,\n '- country: ' + (row.country_code || ''),\n '- buyer_or_seller: ' + (lead.buyer_or_seller || ''),\n '- property_interest: ' + (lead.property_interest || ''),\n '- area_of_interest: ' + (lead.area_of_interest || ''),\n '- their message (if any): ' + (lead.message || ''),\n '',\n 'Write the acknowledgment message now.'\n].join('\\n');\n\nconst body = { model: 'claude-sonnet-5', max_tokens: 400, thinking: { type: 'disabled' }, system, messages: [{ role: 'user', content: user }] };\nreturn [{ json: { anthropic_body: body, _language: language } }];"
+        },
+        "notes": "Builds the Sonnet 5 acknowledgment request (prompts/acknowledgment-generator.md v1). Pulls lead fields from Compute Dedup Key and language from Assemble Lead Row (HTTP/Wait nodes overwrite $json)."
+      },
+      {
+        "id": "08e6583c-b509-4ed4-844f-24ad72a8740e",
+        "name": "Generate Acknowledgment (Sonnet)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          4960,
+          120
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "anthropicApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.anthropic_body) }}",
+          "options": {
+            "timeout": 20000
+          }
+        },
+        "credentials": {
+          "anthropicApi": {
+            "id": "azRjMcNgGfj9c985",
+            "name": "Anthropic account"
+          }
+        },
+        "notes": "Sonnet 5 personalized acknowledgment. 20s timeout, 2 retries. onError=continue => Parse Acknowledgment falls back to a static bilingual template and marks the run partial rather than sending nothing (better an extra message than a dropped lead).",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "d0cd6776-1f4d-49e3-9d94-574ab5e65581",
+        "name": "Parse Acknowledgment",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          5160,
+          120
+        ],
+        "parameters": {
+          "jsCode": "const language = $('Build Acknowledgment Request').item.json._language || 'en';\nconst lead = $('Compute Dedup Key').item.json;\nconst name = (lead.first_name || '').toString().trim();\n\nconst templates = {\n  ar: (name ? ('مرحباً ' + name + '، ') : 'مرحباً، ') + 'شكراً لتواصلك معنا. يسعدنا مساعدتك في طلبك العقاري. ما المنطقة والميزانية التي تفكر بها، ومع تحديد العملة؟',\n  fr: (name ? ('Bonjour ' + name + ', ') : 'Bonjour, ') + 'merci pour votre message. Avec plaisir pour vous aider dans votre recherche immobilière. Quel quartier et quel budget avez-vous en tête, et dans quelle devise ?',\n  en: (name ? ('Hi ' + name + ', ') : 'Hello, ') + 'thanks for reaching out. Happy to help with your property search. Which area and budget do you have in mind, and in which currency?'\n};\n\nlet text = '';\nlet degraded = true;\ntry {\n  const data = ($json && $json.body) ? $json.body : $json;\n  if (data && Array.isArray(data.content)) {\n    const tb = data.content.find(function(b){ return b && b.type === 'text' && b.text; });\n    if (tb) { text = tb.text.toString().trim(); if (text) degraded = false; }\n  }\n} catch (e) {}\n\nif (!text) text = templates[language] || templates.en;\nif (text.length > 500) text = text.slice(0, 497) + '…';\n\nreturn [{ json: { ack_message: text, ack_degraded: degraded, language: language } }];"
+        },
+        "notes": "Extracts the plain WhatsApp text from Sonnet. Degraded path: failed/empty call => static bilingual template (ar/fr/en) so we always acknowledge. Enforces <=500 chars for Twilio."
+      },
+      {
+        "id": "2b0f3538-6ff9-4c4c-9f16-50976adeb105",
+        "name": "Send WhatsApp Acknowledgment (Twilio)",
+        "type": "n8n-nodes-base.twilio",
+        "typeVersion": 1,
+        "position": [
+          5360,
+          120
+        ],
+        "parameters": {
+          "resource": "sms",
+          "operation": "send",
+          "from": "+14155238886",
+          "to": "={{ $('Resolve Send Context').item.json.whatsapp_number }}",
+          "toWhatsapp": true,
+          "message": "={{ $('Parse Acknowledgment').item.json.ack_message }}"
+        },
+        "credentials": {
+          "twilioApi": {
+            "id": "i6W4hkBVTg5L0D9v",
+            "name": "Twilio account"
+          }
+        },
+        "notes": "Sends the acknowledgment over the Twilio WhatsApp sandbox (shared from +14155238886; toWhatsapp adds the whatsapp: prefix). Continue-On-Fail (PLAN 3.4): a Twilio outage is logged partial and the lead still moves to qualifying — never a silent drop. Returns the message sid.",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "9325962c-ec3a-4baf-9275-dc9bac0c0cb0",
+        "name": "Update Lead To Qualifying",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5560,
+          120
+        ],
+        "parameters": {
+          "method": "PATCH",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "id",
+                "value": "=eq.{{ $('Insert Lead Into Supabase').item.json.body[0].id }}"
+              }
+            ]
+          },
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ status: 'qualifying', whatsapp_number: $('Resolve Send Context').item.json.whatsapp_number, timezone: $('Resolve Send Context').item.json.timezone }) }}",
+          "options": {
+            "timeout": 10000,
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "notes": "Moves the lead new -> qualifying after the first outbound and persists whatsapp_number + timezone (set in M3). Runs even if Twilio failed, so a delivery outage does not strand the lead in 'new'.",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "39412226-65a7-4ad2-a1e6-5e654fdde0c1",
+        "name": "Log Outbound Message",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5760,
+          120
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/conversations",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ lead_id: $('Insert Lead Into Supabase').item.json.body[0].id, direction: 'outbound', channel: 'whatsapp', message: $('Parse Acknowledgment').item.json.ack_message, twilio_message_id: ($('Send WhatsApp Acknowledgment (Twilio)').item.json.sid || null), turn_number: 1 }) }}",
+          "options": {
+            "timeout": 10000,
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "notes": "One conversations row per outbound (turn_number=1). Stores the Twilio sid (null if the send degraded) for the observability trail and later reply-handler matching (M4).",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "db17101e-4d8d-4adf-b766-db96320cf9c2",
+        "name": "Log Outbound Run Success",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5960,
+          120
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ workflow_name: '01 - Lead Intake', execution_id: $execution.id, lead_id: $('Insert Lead Into Supabase').item.json.body[0].id, status: ( $('Parse Acknowledgment').item.json.ack_degraded || !$('Send WhatsApp Acknowledgment (Twilio)').item.json.sid || $('Resolve Prayer Delay').item.json.prayer_check === 'unavailable' ) ? 'partial' : 'success', step_name: 'send_acknowledgment', metadata: { intent: $('Assemble Lead Row').item.json.row.intent_classification, language: $('Parse Acknowledgment').item.json.language, country_code: $('Resolve Send Context').item.json.country_code, whatsapp_number: $('Resolve Send Context').item.json.whatsapp_number, twilio_sid: ($('Send WhatsApp Acknowledgment (Twilio)').item.json.sid || null), ack_degraded: $('Parse Acknowledgment').item.json.ack_degraded, send_window_delayed: $('Resolve Send Context').item.json.send_window_delayed, send_window_resume: $('Resolve Send Context').item.json.send_window_resume, prayer_check: $('Resolve Prayer Delay').item.json.prayer_check, prayer_delayed: $('Resolve Prayer Delay').item.json.prayer_delayed } }) }}",
+          "options": {
+            "timeout": 10000,
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "notes": "Terminal outbound log. status=partial when the Sonnet ack degraded OR Twilio failed OR the prayer check was unavailable; else success. Metadata captures the send-window/prayer decisions and the Twilio sid (spec §8.4).",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      }
+    ],
+    "connections": {
+      "Receive Lead Webhook": {
+        "main": [
+          [
+            {
+              "node": "Validate Required Fields",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Validate Required Fields": {
+        "main": [
+          [
+            {
+              "node": "Route Valid vs Malformed",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route Valid vs Malformed": {
+        "main": [
+          [
+            {
+              "node": "Normalize Dedup Input",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Log Malformed Lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normalize Dedup Input": {
+        "main": [
+          [
+            {
+              "node": "Compute Dedup Key",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Compute Dedup Key": {
+        "main": [
+          [
+            {
+              "node": "Check Duplicate Against Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Duplicate Against Supabase": {
+        "main": [
+          [
+            {
+              "node": "Route If Duplicate",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route If Duplicate": {
+        "main": [
+          [
+            {
+              "node": "Update Existing Lead",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Build Language Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Language Request": {
+        "main": [
+          [
+            {
+              "node": "Detect Language (Haiku)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Detect Language (Haiku)": {
+        "main": [
+          [
+            {
+              "node": "Build Intent Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Intent Request": {
+        "main": [
+          [
+            {
+              "node": "Classify Intent (Haiku)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Classify Intent (Haiku)": {
+        "main": [
+          [
+            {
+              "node": "Assemble Lead Row",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Assemble Lead Row": {
+        "main": [
+          [
+            {
+              "node": "Insert Lead Into Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Insert Lead Into Supabase": {
+        "main": [
+          [
+            {
+              "node": "Route Insert Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route Insert Result": {
+        "main": [
+          [
+            {
+              "node": "Route By Intent",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Update Existing Lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Update Existing Lead": {
+        "main": [
+          [
+            {
+              "node": "Log Duplicate",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route By Intent": {
+        "main": [
+          [
+            {
+              "node": "Get Send Config",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Log Run Success",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get Send Config": {
+        "main": [
+          [
+            {
+              "node": "Resolve Send Context",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resolve Send Context": {
+        "main": [
+          [
+            {
+              "node": "Wait For Send Window",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait For Send Window": {
+        "main": [
+          [
+            {
+              "node": "Get Prayer Times",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get Prayer Times": {
+        "main": [
+          [
+            {
+              "node": "Resolve Prayer Delay",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resolve Prayer Delay": {
+        "main": [
+          [
+            {
+              "node": "Wait For Prayer",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait For Prayer": {
+        "main": [
+          [
+            {
+              "node": "Build Acknowledgment Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Acknowledgment Request": {
+        "main": [
+          [
+            {
+              "node": "Generate Acknowledgment (Sonnet)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Generate Acknowledgment (Sonnet)": {
+        "main": [
+          [
+            {
+              "node": "Parse Acknowledgment",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse Acknowledgment": {
+        "main": [
+          [
+            {
+              "node": "Send WhatsApp Acknowledgment (Twilio)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send WhatsApp Acknowledgment (Twilio)": {
+        "main": [
+          [
+            {
+              "node": "Update Lead To Qualifying",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Update Lead To Qualifying": {
+        "main": [
+          [
+            {
+              "node": "Log Outbound Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log Outbound Message": {
+        "main": [
+          [
+            {
+              "node": "Log Outbound Run Success",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "timezone": "Asia/Beirut",
+      "binaryMode": "separate",
+      "errorWorkflow": "8lWcGsY178OA0ePk"
+    },
+    "staticData": null,
+    "meta": null,
+    "nodeGroups": [],
+    "pinData": {},
+    "versionId": "635c159f-210d-4444-83a4-2eaa679a7df7",
+    "activeVersionId": "635c159f-210d-4444-83a4-2eaa679a7df7",
+    "versionCounter": 8,
+    "triggerCount": 1,
+    "sourceWorkflowId": null,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-07-26T05:42:03.037Z",
+        "createdAt": "2026-07-26T05:42:03.037Z",
+        "role": "workflow:owner",
+        "workflowId": "bszGjvdHoOOWD4z2",
+        "projectId": "uJ6EDQaWqVXaXtZI",
+        "project": {
+          "updatedAt": "2025-11-10T13:05:51.471Z",
+          "createdAt": "2025-11-10T12:46:35.987Z",
+          "id": "uJ6EDQaWqVXaXtZI",
+          "name": "Hussein Rmaity <hussienremaity@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "customTelemetryTags": [],
+          "creatorId": "937f08f5-776e-4dbd-9f34-a3769190a477"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]

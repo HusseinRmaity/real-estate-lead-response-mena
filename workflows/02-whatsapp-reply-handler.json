@@ -1,0 +1,2063 @@
+[
+  {
+    "updatedAt": "2026-07-26T20:12:13.519Z",
+    "createdAt": "2026-07-26T13:09:13.152Z",
+    "id": "Qmm3RSGitJS4M1Ph",
+    "name": "02 - WhatsApp Reply Handler",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "id": "webhook-inbound",
+        "name": "Receive WhatsApp Inbound",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          0,
+          300
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "whatsapp-inbound",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "notes": "Twilio inbound WhatsApp webhook (spec 5.02). responseMode onReceived => immediate 200 so Twilio does not retry. Form body arrives under $json.body (From, Body, MessageSid). Public wiring in the Twilio console is a deferred user action (needs a tunnel to localhost).",
+        "webhookId": "b729578d-fb2d-4d40-9d9b-8239532bc7cd"
+      },
+      {
+        "id": "parse-inbound",
+        "name": "Parse Inbound Message",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          220,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const b = $json.body || $json;\nconst rawFrom = (b.From || b.from || '').toString();\nconst phone = rawFrom.replace(/^whatsapp:/i, '').replace(/[\\s\\-()]/g, '').trim();\nconst message = (b.Body || b.body || '').toString().trim();\nconst sid = (b.MessageSid || b.SmsMessageSid || b.SmsSid || '').toString();\nconst skip = (!phone || !message);\nreturn [{ json: { inbound_phone: phone, inbound_message: message, inbound_sid: sid, skip: skip } }];"
+        },
+        "notes": "Extracts sender phone (strips whatsapp: prefix + formatting -> E.164), message body, and Twilio MessageSid. skip=true when phone or body is empty (Twilio status callbacks / empty pings)."
+      },
+      {
+        "id": "route-valid-inbound",
+        "name": "Route Valid Inbound",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          440,
+          300
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "cond-valid",
+                "leftValue": "={{ $json.skip }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "false",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "notes": "Validation gate (production standard 2): a real message (phone+body) proceeds; empty/callback pings route to Log Skipped Inbound."
+      },
+      {
+        "id": "log-skipped",
+        "name": "Log Skipped Inbound",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          440,
+          540
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ workflow_name: '02 - WhatsApp Reply Handler', execution_id: $execution.id, lead_id: null, status: 'success', step_name: 'inbound_skipped', metadata: { phone: $('Parse Inbound Message').item.json.inbound_phone, reason: 'empty body or missing phone' } }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "Terminal: logs a non-actionable inbound (empty/callback) and stops."
+      },
+      {
+        "id": "lookup-qualifying",
+        "name": "Lookup Qualifying Lead",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          660,
+          300
+        ],
+        "parameters": {
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "whatsapp_number",
+                "value": "=eq.{{ $('Parse Inbound Message').item.json.inbound_phone }}"
+              },
+              {
+                "name": "status",
+                "value": "eq.qualifying"
+              },
+              {
+                "name": "created_at",
+                "value": "=gte.{{ $now.minus({ days: 7 }).toISO() }}"
+              },
+              {
+                "name": "order",
+                "value": "created_at.desc"
+              },
+              {
+                "name": "limit",
+                "value": "1"
+              },
+              {
+                "name": "select",
+                "value": "*"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "Most recent qualifying lead for this phone in the last 7 days (spec 5.02). fullResponse+neverError => body is the array (empty = none)."
+      },
+      {
+        "id": "route-lead-found",
+        "name": "Route Lead Found",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          880,
+          300
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "cond-found",
+                "leftValue": "={{ ($json.body || []).length }}",
+                "rightValue": 0,
+                "operator": {
+                  "type": "number",
+                  "operation": "gt"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "notes": "Qualifying lead found => main flow. None => re-engagement branch (a dead lead may be reopened)."
+      },
+      {
+        "id": "lookup-dead",
+        "name": "Lookup Dead Lead",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1100,
+          480
+        ],
+        "parameters": {
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "whatsapp_number",
+                "value": "=eq.{{ $('Parse Inbound Message').item.json.inbound_phone }}"
+              },
+              {
+                "name": "status",
+                "value": "eq.dead"
+              },
+              {
+                "name": "created_at",
+                "value": "=gte.{{ $now.minus({ days: 7 }).toISO() }}"
+              },
+              {
+                "name": "order",
+                "value": "created_at.desc"
+              },
+              {
+                "name": "limit",
+                "value": "1"
+              },
+              {
+                "name": "select",
+                "value": "*"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "Re-engagement lookup: a lead auto-closed (dead) but replying again within 7 days is still a lead (user decision M4)."
+      },
+      {
+        "id": "route-dead-found",
+        "name": "Route Dead Found",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1100,
+          620
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "cond-dead",
+                "leftValue": "={{ ($json.body || []).length }}",
+                "rightValue": 0,
+                "operator": {
+                  "type": "number",
+                  "operation": "gt"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "notes": "Dead lead within 7d => reopen and continue. Otherwise unknown sender => log and drop."
+      },
+      {
+        "id": "reopen-lead",
+        "name": "Reopen Lead",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1320,
+          540
+        ],
+        "parameters": {
+          "method": "PATCH",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "id",
+                "value": "=eq.{{ $('Lookup Dead Lead').item.json.body[0].id }}"
+              }
+            ]
+          },
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=representation"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ status: 'qualifying' }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "dead -> qualifying. return=representation so body[0] carries the reopened row into Resolve Lead Context."
+      },
+      {
+        "id": "log-reengagement",
+        "name": "Log Re-engagement",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1320,
+          720
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ workflow_name: '02 - WhatsApp Reply Handler', execution_id: $execution.id, lead_id: $('Lookup Dead Lead').item.json.body[0].id, status: 'success', step_name: 'reengagement_reopen', metadata: { phone: $('Parse Inbound Message').item.json.inbound_phone, note: 'dead lead reopened within 7d window' } }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "Observability: records the reopen. Parallel side-branch off Reopen Lead; the main path continues via Resolve Lead Context."
+      },
+      {
+        "id": "log-unknown",
+        "name": "Log Unknown Sender",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1100,
+          760
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ workflow_name: '02 - WhatsApp Reply Handler', execution_id: $execution.id, lead_id: null, status: 'success', step_name: 'inbound_no_match', metadata: { phone: $('Parse Inbound Message').item.json.inbound_phone, message: $('Parse Inbound Message').item.json.inbound_message, note: 'no qualifying or recent dead lead - dropped' } }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "Terminal: reply from a phone with no lead (any status) in 7d. Logged, not errored (spec 5.02 'exits gracefully, logs')."
+      },
+      {
+        "id": "resolve-context",
+        "name": "Resolve Lead Context",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1540,
+          300
+        ],
+        "parameters": {
+          "jsCode": "function tryNode(name){ try { const it = $(name).item; return it ? it.json : null; } catch (e) { return null; } }\nlet row = null;\nconst q = tryNode('Lookup Qualifying Lead');\nconst qHas = !!(q && Array.isArray(q.body) && q.body.length);\nif (qHas) row = q.body[0];\nif (!row) { const r = tryNode('Reopen Lead'); if (r && Array.isArray(r.body) && r.body.length) row = r.body[0]; }\nif (!row) { throw new Error('Resolve Lead Context: no lead row resolved from either lookup'); }\nconst phone = $('Parse Inbound Message').item.json.inbound_phone;\nreturn [{ json: {\n  lead_id: row.id,\n  whatsapp_number: row.whatsapp_number || phone,\n  language: row.language || 'en',\n  country_code: row.country_code || null,\n  property_interest: row.property_interest || null,\n  buyer_or_seller: row.buyer_or_seller || null,\n  area_of_interest: row.area_of_interest || null,\n  budget_min: (row.budget_min === undefined ? null : row.budget_min),\n  budget_max: (row.budget_max === undefined ? null : row.budget_max),\n  currency: row.currency || null,\n  timeline: row.timeline || null,\n  reengaged: !qHas\n} }];"
+        },
+        "notes": "Convergence node: normalizes the lead row from whichever lookup produced it (qualifying, or reopened dead). try/catch guards the branch that did not run. reengaged flag feeds the run log."
+      },
+      {
+        "id": "load-history",
+        "name": "Load Conversation History",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1760,
+          300
+        ],
+        "parameters": {
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/conversations",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "lead_id",
+                "value": "=eq.{{ $('Resolve Lead Context').item.json.lead_id }}"
+              },
+              {
+                "name": "order",
+                "value": "created_at.asc"
+              },
+              {
+                "name": "select",
+                "value": "direction,message,turn_number,created_at"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "Full prior history (chronological) BEFORE the current inbound is logged. body.length is the turn baseline: inbound = len+1, next outbound = len+2."
+      },
+      {
+        "id": "log-inbound",
+        "name": "Log Inbound Message",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1980,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/conversations",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ lead_id: $('Resolve Lead Context').item.json.lead_id, direction: 'inbound', channel: 'whatsapp', message: $('Parse Inbound Message').item.json.inbound_message, twilio_message_id: ($('Parse Inbound Message').item.json.inbound_sid || null), turn_number: ((($('Load Conversation History').item.json.body) || []).length + 1) }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "Persist the inbound BEFORE calling the model, so a downstream failure never loses the lead's message (spec 5.02 step 4.3)."
+      },
+      {
+        "id": "build-conversation",
+        "name": "Build Conversation Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2200,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const ctx = $('Resolve Lead Context').item.json;\nconst hist = ($('Load Conversation History').item.json.body) || [];\nconst inboundMsg = $('Parse Inbound Message').item.json.inbound_message;\n\nconst system = [\n 'You are the qualification assistant for a MENA real-estate agency, talking to a lead over WhatsApp. You continue an ongoing conversation: you get the full message history and the lead newest message. Gather the few facts an agent needs, decide what happens next, and write the single next message.',\n 'LANGUAGE: reply in the language the lead is using RIGHT NOW (ar | en | fr | mixed). If they switch language mid-conversation, follow them, never force them back. ar = natural Arabic in the country register (Gulf/Levant/Egyptian). mixed = lead in Arabic, light English ok.',\n 'CULTURAL (non-negotiable): formality by tone - casual/short/emoji => informal Arabic anta (أنت); formal/business/older => respectful hadretak (حضرتك); unsure => lean respectful. NEVER use in-sha-Allah (إن شاء الله) for logistics/timing, use we will do our best (سنبذل قصارى جهدنا). No faith-assuming greeting (neutral marhaba / Hello / Bonjour). Currency NEVER assumed.',\n 'EXTRACT only what the lead actually said, else null: budget_min, budget_max (numbers; single figure => budget_max only; range => both); currency (AED,SAR,USD,LBP,EGP,QAR,KWD,MAD,TND,DZD; null if unstated); timeline (short text as stated); buyer_or_seller (buyer/seller if clear); area_of_interest.',\n 'DECIDE action: handoff = enough for an agent (area AND (budget OR firm timeline)) OR clearly high-intent/ready OR the lead asks for a human. end = lead opts out / not interested / wrong number / asks to stop. continue = otherwise, ask the single most useful missing fact.',\n 'next_message: ONE WhatsApp message under 500 chars in the lead current language. continue => ask exactly ONE question for the most valuable missing field. handoff => warm handoff, a specialist will follow up shortly (no specific time, no إن شاء الله). end => brief polite close, no hard sell. Concrete, respectful, no dream-home hype, at most one tasteful emoji if it matches the lead tone.',\n 'OUTPUT ONLY a JSON object, no prose, no code fences: {\"extracted_info\":{\"budget_min\":number|null,\"budget_max\":number|null,\"currency\":string|null,\"timeline\":string|null,\"buyer_or_seller\":\"buyer\"|\"seller\"|null,\"area_of_interest\":string|null},\"action\":\"continue\"|\"handoff\"|\"end\",\"next_message\":string,\"language_used\":\"ar\"|\"en\"|\"fr\"|\"mixed\"}'\n].join('\\n');\n\nconst header = [\n 'Lead context (already known, do not re-ask what is already filled):',\n '- language (last known): ' + (ctx.language || ''),\n '- country: ' + (ctx.country_code || ''),\n '- property_interest: ' + (ctx.property_interest || ''),\n '- buyer_or_seller: ' + (ctx.buyer_or_seller || ''),\n '- area_of_interest: ' + (ctx.area_of_interest || ''),\n '- budget_min: ' + (ctx.budget_min == null ? '' : ctx.budget_min) + ' / budget_max: ' + (ctx.budget_max == null ? '' : ctx.budget_max) + ' / currency: ' + (ctx.currency || ''),\n '- timeline: ' + (ctx.timeline || ''),\n '',\n 'The lead reached out about: ' + (ctx.property_interest || 'a property') + '. Continue the conversation.'\n].join('\\n');\n\nconst raw = [];\nraw.push({ role: 'user', content: header });\nhist.forEach(function(r){ raw.push({ role: (r.direction === 'outbound' ? 'assistant' : 'user'), content: (r.message || '').toString() }); });\nraw.push({ role: 'user', content: inboundMsg });\n\nconst messages = [];\nraw.forEach(function(m){\n  if (!m.content) return;\n  if (messages.length && messages[messages.length - 1].role === m.role) { messages[messages.length - 1].content += '\\n\\n' + m.content; }\n  else { messages.push({ role: m.role, content: m.content }); }\n});\n\nconst outbound_count = hist.filter(function(r){ return r.direction === 'outbound'; }).length;\nconst body = { model: 'claude-sonnet-5', max_tokens: 600, thinking: { type: 'disabled' }, system: system, messages: messages };\nreturn [{ json: { anthropic_body: body, outbound_count: outbound_count, _language: ctx.language || 'en' } }];"
+        },
+        "notes": "Builds the Sonnet 5 request (prompts/conversation-handler.md v1). Rebuilds messages[] from history (outbound->assistant, inbound->user), prepends a user context header (Anthropic requires messages[0]=user; the ack is assistant), merges consecutive same-role turns. thinking:disabled (decisions BUG #4). outbound_count feeds the 6-turn cap."
+      },
+      {
+        "id": "extract-respond",
+        "name": "Extract And Respond (Sonnet)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2420,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "anthropicApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.anthropic_body) }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "credentials": {
+          "anthropicApi": {
+            "id": "azRjMcNgGfj9c985",
+            "name": "Anthropic account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true,
+        "notes": "Sonnet 5 extraction + response. 30s timeout, 3 retries. onError=continue => Parse And Cap falls back to action=handoff (escalate to a human) rather than dropping the lead."
+      },
+      {
+        "id": "parse-cap",
+        "name": "Parse And Cap",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2640,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const built = $('Build Conversation Request').item.json;\nconst outbound_count = built.outbound_count || 0;\nconst lang = built._language || 'en';\nfunction extractJson(t){ if (!t) return null; const s = t.indexOf('{'); const e = t.lastIndexOf('}'); if (s < 0 || e < 0 || e < s) return null; try { return JSON.parse(t.slice(s, e + 1)); } catch (err) { return null; } }\nlet parsed = null; let degraded = true;\ntry {\n  const data = ($json && $json.body) ? $json.body : $json;\n  if (data && Array.isArray(data.content)) {\n    const tb = data.content.find(function(b){ return b && b.type === 'text' && b.text; });\n    if (tb) { parsed = extractJson(tb.text); if (parsed) degraded = false; }\n  }\n} catch (e) {}\nif (!parsed) parsed = { extracted_info: {}, action: 'handoff', next_message: '', language_used: lang };\nlet action = (['continue', 'handoff', 'end'].indexOf(parsed.action) >= 0) ? parsed.action : 'handoff';\nlet capped = false;\nif (action === 'continue' && outbound_count >= 6) { action = 'handoff'; capped = true; }\nconst ei = parsed.extracted_info || {};\nconst new_status = (action === 'handoff') ? 'qualified' : (action === 'end' ? 'dead' : 'qualifying');\nconst patch = { status: new_status };\nfunction setIf(k, v){ if (v !== null && v !== undefined && v !== '') patch[k] = v; }\nsetIf('budget_min', ei.budget_min);\nsetIf('budget_max', ei.budget_max);\nsetIf('currency', ei.currency);\nsetIf('timeline', ei.timeline);\nsetIf('area_of_interest', ei.area_of_interest);\nif (ei.buyer_or_seller === 'buyer' || ei.buyer_or_seller === 'seller') patch.buyer_or_seller = ei.buyer_or_seller;\nif (['ar', 'en', 'fr', 'mixed'].indexOf(parsed.language_used) >= 0) patch.language = parsed.language_used;\nlet next_message = (parsed.next_message || '').toString().trim();\nif (!next_message) {\n  const tmpl = { ar: 'شكراً لتواصلك. سيتواصل معك أحد المختصين قريباً لمتابعة طلبك.', fr: 'Merci pour votre message. Un de nos spécialistes vous recontactera très bientôt.', en: 'Thanks for your message. One of our specialists will follow up with you shortly.' };\n  next_message = tmpl[lang] || tmpl.en;\n}\nif (next_message.length > 500) next_message = next_message.slice(0, 497) + '…';\nreturn [{ json: { action: action, capped: capped, degraded: degraded, new_status: new_status, lead_patch: patch, next_message: next_message, language_used: parsed.language_used || lang, extracted_info: ei, outbound_count: outbound_count } }];"
+        },
+        "notes": "Parses Sonnet JSON (fence-tolerant extractJson). HARD 6-TURN CAP: if the model says continue but 6 bot messages already sent (outbound_count>=6), force handoff. Derives new lead status (handoff->qualified, end->dead, continue->qualifying) and a non-null-only lead_patch. Failed call => action=handoff + degraded (escalate, never drop)."
+      },
+      {
+        "id": "update-lead",
+        "name": "Update Lead With Extracted Info",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2860,
+          300
+        ],
+        "parameters": {
+          "method": "PATCH",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "id",
+                "value": "=eq.{{ $('Resolve Lead Context').item.json.lead_id }}"
+              }
+            ]
+          },
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($('Parse And Cap').item.json.lead_patch) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "Merges only non-null extracted fields + new status (spec 4.6: prior values preserved when a turn does not mention them). updated_at auto-touches, which also resets the 02b 48h silence timer."
+      },
+      {
+        "id": "route-action",
+        "name": "Route By Action",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          3080,
+          300
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "cond-continue",
+                "leftValue": "={{ $('Parse And Cap').item.json.action }}",
+                "rightValue": "continue",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "notes": "continue => send next question. handoff/end => no send; route to scoring branch (M5). Reads action from Parse And Cap (the PATCH node overwrites $json)."
+      },
+      {
+        "id": "send-reply",
+        "name": "Send WhatsApp Reply",
+        "type": "n8n-nodes-base.twilio",
+        "typeVersion": 1,
+        "position": [
+          3300,
+          200
+        ],
+        "parameters": {
+          "resource": "sms",
+          "operation": "send",
+          "from": "+14155238886",
+          "to": "={{ $('Parse Inbound Message').item.json.inbound_phone }}",
+          "toWhatsapp": true,
+          "message": "={{ $('Parse And Cap').item.json.next_message }}"
+        },
+        "credentials": {
+          "twilioApi": {
+            "id": "i6W4hkBVTg5L0D9v",
+            "name": "Twilio account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true,
+        "notes": "Sends the next question over the Twilio WhatsApp sandbox to the inbound sender. Continue-On-Fail: a send outage (e.g. trial daily cap 63038) logs partial; the reply text is still recorded in conversations so quality is auditable."
+      },
+      {
+        "id": "log-outbound-reply",
+        "name": "Log Outbound Reply",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3520,
+          200
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/conversations",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ lead_id: $('Resolve Lead Context').item.json.lead_id, direction: 'outbound', channel: 'whatsapp', message: $('Parse And Cap').item.json.next_message, twilio_message_id: ($('Send WhatsApp Reply').item.json.sid || null), turn_number: ((($('Load Conversation History').item.json.body) || []).length + 2) }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "One conversations row per bot reply. turn_number = history_len + 2 (inbound was +1). Stores the Twilio sid (null if the send degraded)."
+      },
+      {
+        "id": "log-reply-success",
+        "name": "Log Reply Run Success",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3740,
+          200
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ workflow_name: '02 - WhatsApp Reply Handler', execution_id: $execution.id, lead_id: $('Resolve Lead Context').item.json.lead_id, status: ( $('Parse And Cap').item.json.degraded || !$('Send WhatsApp Reply').item.json.sid ) ? 'partial' : 'success', step_name: 'reply_continue', metadata: { action: $('Parse And Cap').item.json.action, capped: $('Parse And Cap').item.json.capped, degraded: $('Parse And Cap').item.json.degraded, language_used: $('Parse And Cap').item.json.language_used, extracted_info: $('Parse And Cap').item.json.extracted_info, twilio_sid: ($('Send WhatsApp Reply').item.json.sid || null), outbound_count: $('Parse And Cap').item.json.outbound_count, reengaged: $('Resolve Lead Context').item.json.reengaged } }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "Terminal (continue path). status=partial when the Sonnet call degraded OR Twilio failed; else success. Metadata carries the extracted fields + twilio sid for the observability trail."
+      },
+      {
+        "id": "log-handoff",
+        "name": "Log Handoff Run",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3300,
+          420
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ workflow_name: '02 - WhatsApp Reply Handler', execution_id: $execution.id, lead_id: $('Resolve Lead Context').item.json.lead_id, status: ($('Parse And Cap').item.json.degraded ? 'partial' : 'success'), step_name: 'reply_handoff', metadata: { action: $('Parse And Cap').item.json.action, capped: $('Parse And Cap').item.json.capped, degraded: $('Parse And Cap').item.json.degraded, new_status: $('Parse And Cap').item.json.new_status, extracted_info: $('Parse And Cap').item.json.extracted_info, language_used: $('Parse And Cap').item.json.language_used, reengaged: $('Resolve Lead Context').item.json.reengaged, note: 'handoff/end - scoring handled in M5' } }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "Terminal (handoff/end path). No WhatsApp send. Lead already set to qualified (handoff) or dead (end) by the PATCH. M5 attaches scoring + CRM + Slack here."
+      },
+      {
+        "id": "sticky-cap",
+        "name": "Note - 6-turn cap",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          2600,
+          500
+        ],
+        "parameters": {
+          "content": "## 6-turn cap (decision 7)\nParse And Cap forces action='handoff' once 6 bot outbound messages exist (the ack = turn 1), even if the model wants to continue. Prevents unbounded conversation loops (production standard 8).",
+          "height": 180,
+          "width": 320
+        }
+      },
+      {
+        "id": "sticky-reengage",
+        "name": "Note - re-engagement",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1060,
+          900
+        ],
+        "parameters": {
+          "content": "## Re-engagement branch\nInbound with no 'qualifying' lead but a 'dead' lead for the same phone within 7 days => reopen (dead->qualifying) and continue. A lead replying at hour 50 (after the 02b 48h auto-close) is still a lead.",
+          "height": 200,
+          "width": 340
+        }
+      },
+      {
+        "id": "rte-hoe",
+        "name": "Route Handoff vs End",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          3300,
+          560
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "conditions": [
+              {
+                "id": "c-handoff",
+                "leftValue": "={{ $('Parse And Cap').item.json.action }}",
+                "rightValue": "handoff",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "notes": "Splits the non-continue path: action=handoff (qualified) -> scoring+CRM+Slack chain; action=end (dead) -> existing Log Handoff Run, no CRM/Slack."
+      },
+      {
+        "id": "load-lead",
+        "name": "Load Lead For Handoff",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3520,
+          560
+        ],
+        "parameters": {
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "id",
+                "value": "=eq.{{ $('Resolve Lead Context').item.json.lead_id }}"
+              },
+              {
+                "name": "select",
+                "value": "*"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "notes": "Fresh lead row (name/email/phone + fields Parse And Cap just wrote). Single source of truth for scoring, HubSpot and Slack.",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "load-trans",
+        "name": "Load Full Transcript",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3740,
+          560
+        ],
+        "parameters": {
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/conversations",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "lead_id",
+                "value": "=eq.{{ $('Resolve Lead Context').item.json.lead_id }}"
+              },
+              {
+                "name": "order",
+                "value": "created_at.asc"
+              },
+              {
+                "name": "select",
+                "value": "direction,message,turn_number"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "notes": "Full transcript (includes the just-logged inbound) for the scorer.",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "build-score",
+        "name": "Build Scoring Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3960,
+          560
+        ],
+        "parameters": {
+          "jsCode": "const leadArr=($('Load Lead For Handoff').item.json.body)||[]; const lead=leadArr[0]||{}; const hist=($('Load Full Transcript').item.json.body)||[]; const system=['You are the lead-qualification scorer for a MENA real-estate agency. You are given the known lead data and the full WhatsApp conversation between the lead and the agency assistant. The conversation is over and the lead is being handed to a human agent. Produce a single honest qualification assessment the agent reads first.','SCORE (0-100 integer). Weigh, in rough priority: Budget - a concrete figure WITH an explicit currency is strong; a figure without a currency is weaker (currency is never assumed); no budget is weak. Timeline - firm and near (this week/this month, ready to view, cash) is strong; vague (just browsing, maybe later) is weak. Area - a specific neighbourhood or community is strong; a whole city is medium; none is weak. Intent - explicitly asked for a human, cash buyer, wants a viewing, urgency are strong. Do not reward politeness or message length; score the substance the lead actually gave.','TIER must match the score: hot when score >= 70; warm when 45 to 69; cold when below 45.','SUMMARY - 2 to 3 sentences in ENGLISH regardless of the conversation language. Factual: who the lead is, what they want, budget and timeline and area as actually stated, and the single strongest and weakest signal. Never invent facts. Always state currency explicitly with any figure; if a figure was given without a currency, say so.','NEXT_BEST_ACTION - one specific concrete action for the agent. No hedging, no religious phrasing, no promised times.','OUTPUT ONLY a JSON object, no prose, no code fences, with keys: score (integer 0-100), tier (one of hot, warm, cold), summary (string), next_best_action (string).'].join('\\n'); const transcript=hist.map(function(r){return (r.direction==='outbound'?'A: ':'L: ')+(r.message||'').toString();}).join('\\n'); const name=((lead.first_name||'')+' '+(lead.last_name||'')).trim(); const user=['LEAD','- name: '+name,'- phone: '+(lead.whatsapp_number||'')+'   email: '+(lead.email||''),'- language: '+(lead.language||'')+'   country: '+(lead.country_code||''),'- property_interest: '+(lead.property_interest||''),'- buyer_or_seller: '+(lead.buyer_or_seller||''),'- area_of_interest: '+(lead.area_of_interest||''),'- budget_min: '+(lead.budget_min==null?'':lead.budget_min)+'  budget_max: '+(lead.budget_max==null?'':lead.budget_max)+'  currency: '+(lead.currency||''),'- timeline: '+(lead.timeline||''),'- intent_classification (intake): '+(lead.intent_classification||''),'','CONVERSATION (oldest first; A = assistant, L = lead):',transcript,'','Score this lead now.'].join('\\n'); const body={model:'claude-sonnet-5',max_tokens:500,thinking:{type:'disabled'},system:system,messages:[{role:'user',content:user}]}; return [{json:{anthropic_body:body}}];"
+        },
+        "notes": "Builds the final-scorer Sonnet 5 request (prompts/final-scorer.md v1). thinking disabled, max_tokens 500."
+      },
+      {
+        "id": "score-sonnet",
+        "name": "Score And Summarize (Sonnet)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          4180,
+          560
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "anthropicApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.anthropic_body) }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "credentials": {
+          "anthropicApi": {
+            "id": "azRjMcNgGfj9c985",
+            "name": "Anthropic account"
+          }
+        },
+        "notes": "Final scoring. 30s/3 retries. onError=continue => Parse Score falls back to a safe warm/50 so the handoff is never dropped.",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "parse-score",
+        "name": "Parse Score",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4400,
+          560
+        ],
+        "parameters": {
+          "jsCode": "const lead=(($('Load Lead For Handoff').item.json.body)||[])[0]||{}; function extractJson(t){if(!t)return null;const s=t.indexOf('{');const e=t.lastIndexOf('}');if(s<0||e<0||e<s)return null;try{return JSON.parse(t.slice(s,e+1));}catch(err){return null;}} let parsed=null,degraded=true; try{const data=($json&&$json.body)?$json.body:$json;if(data&&Array.isArray(data.content)){const tb=data.content.find(function(b){return b&&b.type==='text'&&b.text;});if(tb){parsed=extractJson(tb.text);if(parsed)degraded=false;}}}catch(e){} let score=50,summary='',nba=''; if(parsed){score=parseInt(parsed.score,10);if(isNaN(score))score=50;score=Math.max(0,Math.min(100,score));summary=(parsed.summary||'').toString().trim();nba=(parsed.next_best_action||'').toString().trim();} const tier=score>=70?'hot':(score>=45?'warm':'cold'); if(!summary){const parts=[];const nm=((lead.first_name||'')+' '+(lead.last_name||'')).trim();parts.push((nm||'Lead')+' interested in '+(lead.property_interest||'a property')+(lead.area_of_interest?(' in '+lead.area_of_interest):'')+'.');if(lead.budget_max!=null)parts.push('Budget up to '+lead.budget_max+' '+(lead.currency||'(currency unstated)')+'.');if(lead.timeline)parts.push('Timeline: '+lead.timeline+'.');parts.push('(Auto-summary - scoring model unavailable.)');summary=parts.join(' ');} if(!nba)nba='Call the lead to confirm budget, currency and timeline, then propose next steps.'; if(summary.length>950)summary=summary.slice(0,947)+'...'; const create_deal=(tier==='hot'||tier==='warm')&&!lead.hubspot_deal_id; const email=lead.email;const phone=lead.whatsapp_number||lead.phone; const filters=email?[{propertyName:'email',operator:'EQ',value:email}]:[{propertyName:'phone',operator:'EQ',value:(phone||'')}]; const search_body={filterGroups:[{filters:filters}],properties:['email','phone','firstname','lastname'],limit:1}; const cp={}; if(lead.first_name)cp.firstname=lead.first_name; if(lead.last_name)cp.lastname=lead.last_name; if(lead.email)cp.email=lead.email; if(lead.whatsapp_number)cp.phone=lead.whatsapp_number; cp.lead_score=score;cp.qualification_tier=tier;cp.qualification_summary=summary; if(lead.area_of_interest)cp.area_of_interest=lead.area_of_interest; if(lead.language)cp.lead_language=lead.language; return [{json:{score:score,tier:tier,summary:summary,next_best_action:nba,degraded:degraded,create_deal:create_deal,search_body:search_body,contact_props:cp}}];"
+        },
+        "notes": "Fence-tolerant parse; clamps score 0-100; derives tier from score (hot>=70, warm>=45, cold). Fallback warm/50 on degraded. Emits HubSpot search_body + contact_props. create_deal guarded by existing hubspot_deal_id (idempotency)."
+      },
+      {
+        "id": "hs-search",
+        "name": "Search HubSpot Contact",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          4620,
+          560
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.hubapi.com/crm/v3/objects/contacts/search",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "httpHeaderAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($('Parse Score').item.json.search_body) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "USzSuOHtdVabkWQq",
+            "name": "Header Auth account 2"
+          }
+        },
+        "notes": "Upsert step 1: find existing contact by email (fallback phone). fullResponse+neverError so an empty/failed search routes to create.",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "rte-contact",
+        "name": "Route Contact Exists",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          4840,
+          560
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "conditions": [
+              {
+                "id": "c-exists",
+                "leftValue": "={{ (($json.body && $json.body.results) || []).length }}",
+                "rightValue": 0,
+                "operator": {
+                  "type": "number",
+                  "operation": "gt"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "notes": "Found => update; none => create."
+      },
+      {
+        "id": "hs-update",
+        "name": "Update HubSpot Contact",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5060,
+          470
+        ],
+        "parameters": {
+          "method": "PATCH",
+          "url": "=https://api.hubapi.com/crm/v3/objects/contacts/{{ $('Search HubSpot Contact').item.json.body.results[0].id }}",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "httpHeaderAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ properties: $('Parse Score').item.json.contact_props }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "USzSuOHtdVabkWQq",
+            "name": "Header Auth account 2"
+          }
+        },
+        "notes": "Update existing contact with standard + 5 custom qualification props.",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "hs-create",
+        "name": "Create HubSpot Contact",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5060,
+          660
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.hubapi.com/crm/v3/objects/contacts",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "httpHeaderAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ properties: $('Parse Score').item.json.contact_props }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "USzSuOHtdVabkWQq",
+            "name": "Header Auth account 2"
+          }
+        },
+        "notes": "Create new contact with standard + 5 custom qualification props.",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "resolve-cid",
+        "name": "Resolve Contact Id",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          5300,
+          560
+        ],
+        "parameters": {
+          "jsCode": "function tryNode(n){try{const it=$(n).item;return it?it.json:null;}catch(e){return null;}} function bodyOf(x){return x?(x.body!==undefined?x.body:x):null;} const lead=(($('Load Lead For Handoff').item.json.body)||[])[0]||{}; const ps=$('Parse Score').item.json; let cid=null;let b=bodyOf(tryNode('Update HubSpot Contact'));if(b&&b.id)cid=b.id; if(!cid){b=bodyOf(tryNode('Create HubSpot Contact'));if(b&&b.id)cid=b.id;} if(!cid){b=bodyOf(tryNode('Search HubSpot Contact'));if(b&&b.results&&b.results[0])cid=b.results[0].id;} const url=cid?('https://app-eu1.hubspot.com/contacts/148969084/record/0-1/'+cid):null; const name=((lead.first_name||'')+' '+(lead.last_name||'')).trim()||'Lead'; const area=lead.area_of_interest||lead.property_interest||'property'; const amt=lead.budget_max;const cur=lead.currency||''; const money=(amt!=null)?(Number(amt).toLocaleString('en-US')+(cur?(' '+cur):'')):''; const dealname='Lead - '+name+' - '+area+(money?(' ('+money+')'):''); const stage=ps.tier==='hot'?'qualifiedtobuy':'appointmentscheduled'; const props={dealname:dealname,dealstage:stage,pipeline:'default'}; if(amt!=null)props.amount=amt; const deal_body={properties:props}; if(cid){deal_body.associations=[{to:{id:String(cid)},types:[{associationCategory:'HUBSPOT_DEFINED',associationTypeId:3}]}];} return [{json:{hubspot_contact_id:cid?String(cid):null,hubspot_contact_url:url,deal_body:deal_body}}];"
+        },
+        "notes": "Converges update/create; derives portal contact link (portal 148969084, eu1). Builds the deal body (name incl. currency, stage by tier, amount=budget_max, contact association type 3)."
+      },
+      {
+        "id": "rte-deal",
+        "name": "Route Tier For Deal",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          5520,
+          560
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "conditions": [
+              {
+                "id": "c-deal",
+                "leftValue": "={{ $('Parse Score').item.json.create_deal }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              },
+              {
+                "id": "c-cid",
+                "leftValue": "={{ $('Resolve Contact Id').item.json.hubspot_contact_id }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "notes": "Create a deal only for hot/warm AND when a contact id exists to associate. Cold or no-contact skips straight to Slack."
+      },
+      {
+        "id": "hs-deal",
+        "name": "Create HubSpot Deal",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5740,
+          460
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.hubapi.com/crm/v3/objects/deals",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "httpHeaderAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($('Resolve Contact Id').item.json.deal_body) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "USzSuOHtdVabkWQq",
+            "name": "Header Auth account 2"
+          }
+        },
+        "notes": "Hot/warm only. Deal associated to the contact; stage qualifiedtobuy (hot) / appointmentscheduled (warm); amount=budget_max; currency in the name (portal currency USD, multi-currency off).",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "build-slack",
+        "name": "Build Slack Message",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          5960,
+          560
+        ],
+        "parameters": {
+          "jsCode": "function tryNode(n){try{const it=$(n).item;return it?it.json:null;}catch(e){return null;}} function bodyOf(x){return x?(x.body!==undefined?x.body:x):null;} const lead=(($('Load Lead For Handoff').item.json.body)||[])[0]||{}; const ps=$('Parse Score').item.json; const contact=$('Resolve Contact Id').item.json; const dealBody=bodyOf(tryNode('Create HubSpot Deal')); const dealId=(dealBody&&dealBody.id)?String(dealBody.id):null; const dealUrl=dealId?('https://app-eu1.hubspot.com/contacts/148969084/record/0-3/'+dealId):null; const name=((lead.first_name||'')+' '+(lead.last_name||'')).trim()||'(no name)'; const tierU=String(ps.tier||'').toUpperCase(); const budget=(lead.budget_max!=null)?(Number(lead.budget_max).toLocaleString('en-US')+' '+(lead.currency||'(currency?)')):'-'; const fields=[{type:'mrkdwn',text:'*Name:*\\n'+name},{type:'mrkdwn',text:'*Phone:*\\n'+(lead.whatsapp_number||lead.phone||'-')},{type:'mrkdwn',text:'*Email:*\\n'+(lead.email||'-')},{type:'mrkdwn',text:'*Lang / Country:*\\n'+((lead.language||'?')+' / '+(lead.country_code||'?'))},{type:'mrkdwn',text:'*Score / Tier:*\\n'+ps.score+' - '+tierU},{type:'mrkdwn',text:'*Budget / Timeline:*\\n'+budget+' - '+(lead.timeline||'-')},{type:'mrkdwn',text:'*Area:*\\n'+(lead.area_of_interest||'-')},{type:'mrkdwn',text:'*Type:*\\n'+(lead.buyer_or_seller||'-')}]; const blocks=[{type:'header',text:{type:'plain_text',text:'New qualified lead - '+tierU,emoji:true}},{type:'section',fields:fields},{type:'section',text:{type:'mrkdwn',text:'*Summary:*\\n'+(ps.summary||'-')}},{type:'section',text:{type:'mrkdwn',text:'*Next best action:*\\n'+(ps.next_best_action||'-')}}]; const links=[]; if(contact.hubspot_contact_url)links.push('<'+contact.hubspot_contact_url+'|HubSpot contact>'); if(dealUrl)links.push('<'+dealUrl+'|HubSpot deal>'); if(links.length)blocks.push({type:'context',elements:[{type:'mrkdwn',text:links.join('    ')}]}); if(ps.degraded)blocks.push({type:'context',elements:[{type:'mrkdwn',text:'scoring model was unavailable - score is a safe fallback'}]}); const text='New qualified lead: '+name+' ('+tierU+', score '+ps.score+')'; const slack_body={channel:'#leads',text:text,blocks:blocks}; const patch={status:'handed_off',qualification_score:ps.score,qualification_tier:ps.tier,qualification_summary:ps.summary}; if(contact.hubspot_contact_id)patch.hubspot_contact_id=String(contact.hubspot_contact_id); if(dealId)patch.hubspot_deal_id=dealId; return [{json:{slack_body:slack_body,hubspot_deal_id:dealId,lead_patch:patch}}];"
+        },
+        "notes": "Builds the #leads Block Kit message + emits lead_patch (handed_off + score/tier/summary + hubspot ids) for Mark Handed Off."
+      },
+      {
+        "id": "slack-notify",
+        "name": "Slack Notify Agent",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          6180,
+          560
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://slack.com/api/chat.postMessage",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "slackApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($('Build Slack Message').item.json.slack_body) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "credentials": {
+          "slackApi": {
+            "id": "du5bPExqejoLC4AW",
+            "name": "Slack account 2"
+          }
+        },
+        "notes": "Posts the lead to #leads via chat.postMessage (slackApi bot token). Continue-On-Fail: a Slack outage logs partial; the lead is still handed_off in the DB.",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 4,
+        "waitBetweenTries": 3000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "mark-handoff",
+        "name": "Mark Handed Off",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          6400,
+          560
+        ],
+        "parameters": {
+          "method": "PATCH",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "id",
+                "value": "=eq.{{ $('Resolve Lead Context').item.json.lead_id }}"
+              }
+            ]
+          },
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($('Build Slack Message').item.json.lead_patch) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "notes": "Final lead update: status=handed_off + qualification_score/tier/summary + hubspot_contact_id/deal_id.",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "log-complete",
+        "name": "Log Handoff Complete",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          6620,
+          560
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify((function(){ var ps=$('Parse Score').item.json; var contact=$('Resolve Contact Id').item.json; var deal=$('Build Slack Message').item.json; var slack=$('Slack Notify Agent').item.json; var sb=(slack&&slack.body)?slack.body:slack; var slackOk=!!(sb&&sb.ok); var partial=ps.degraded||!contact.hubspot_contact_id||!slackOk; return { workflow_name:'02 - WhatsApp Reply Handler', execution_id:$execution.id, lead_id:$('Resolve Lead Context').item.json.lead_id, status: partial?'partial':'success', step_name:'handoff_complete', metadata:{ score:ps.score, tier:ps.tier, degraded:ps.degraded, hubspot_contact_id:contact.hubspot_contact_id||null, hubspot_deal_id:deal.hubspot_deal_id||null, deal_created:!!deal.hubspot_deal_id, slack_ok:slackOk, next_best_action:ps.next_best_action } }; })()) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "notes": "Terminal (handoff path). status=partial if scoring degraded, no contact created, or Slack failed; else success.",
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "sticky-m5",
+        "name": "Note - M5 handoff",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          3260,
+          780
+        ],
+        "parameters": {
+          "content": "## M5 handoff branch (scoring -> CRM -> Slack)\nOn action=handoff: score with Sonnet 5 (final-scorer), upsert the HubSpot contact (search email/phone -> update/create) with 5 custom qualification props, create a deal for hot/warm (skipped if the lead already has a hubspot_deal_id), post the lead to #leads, then set the lead to handed_off. Every external call is Continue-On-Fail so a HubSpot or Slack outage never drops the lead. action=end goes to Log Handoff Run (dead, no CRM/Slack).",
+          "height": 230,
+          "width": 640
+        }
+      }
+    ],
+    "connections": {
+      "Receive WhatsApp Inbound": {
+        "main": [
+          [
+            {
+              "node": "Parse Inbound Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse Inbound Message": {
+        "main": [
+          [
+            {
+              "node": "Route Valid Inbound",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route Valid Inbound": {
+        "main": [
+          [
+            {
+              "node": "Lookup Qualifying Lead",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Log Skipped Inbound",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Lookup Qualifying Lead": {
+        "main": [
+          [
+            {
+              "node": "Route Lead Found",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route Lead Found": {
+        "main": [
+          [
+            {
+              "node": "Resolve Lead Context",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Lookup Dead Lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Lookup Dead Lead": {
+        "main": [
+          [
+            {
+              "node": "Route Dead Found",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route Dead Found": {
+        "main": [
+          [
+            {
+              "node": "Reopen Lead",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Log Unknown Sender",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Reopen Lead": {
+        "main": [
+          [
+            {
+              "node": "Resolve Lead Context",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Log Re-engagement",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resolve Lead Context": {
+        "main": [
+          [
+            {
+              "node": "Load Conversation History",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Conversation History": {
+        "main": [
+          [
+            {
+              "node": "Log Inbound Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log Inbound Message": {
+        "main": [
+          [
+            {
+              "node": "Build Conversation Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Conversation Request": {
+        "main": [
+          [
+            {
+              "node": "Extract And Respond (Sonnet)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract And Respond (Sonnet)": {
+        "main": [
+          [
+            {
+              "node": "Parse And Cap",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse And Cap": {
+        "main": [
+          [
+            {
+              "node": "Update Lead With Extracted Info",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Update Lead With Extracted Info": {
+        "main": [
+          [
+            {
+              "node": "Route By Action",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route By Action": {
+        "main": [
+          [
+            {
+              "node": "Send WhatsApp Reply",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Route Handoff vs End",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send WhatsApp Reply": {
+        "main": [
+          [
+            {
+              "node": "Log Outbound Reply",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log Outbound Reply": {
+        "main": [
+          [
+            {
+              "node": "Log Reply Run Success",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route Handoff vs End": {
+        "main": [
+          [
+            {
+              "node": "Load Lead For Handoff",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Log Handoff Run",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Lead For Handoff": {
+        "main": [
+          [
+            {
+              "node": "Load Full Transcript",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Full Transcript": {
+        "main": [
+          [
+            {
+              "node": "Build Scoring Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Scoring Request": {
+        "main": [
+          [
+            {
+              "node": "Score And Summarize (Sonnet)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Score And Summarize (Sonnet)": {
+        "main": [
+          [
+            {
+              "node": "Parse Score",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse Score": {
+        "main": [
+          [
+            {
+              "node": "Search HubSpot Contact",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Search HubSpot Contact": {
+        "main": [
+          [
+            {
+              "node": "Route Contact Exists",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route Contact Exists": {
+        "main": [
+          [
+            {
+              "node": "Update HubSpot Contact",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Create HubSpot Contact",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Update HubSpot Contact": {
+        "main": [
+          [
+            {
+              "node": "Resolve Contact Id",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Create HubSpot Contact": {
+        "main": [
+          [
+            {
+              "node": "Resolve Contact Id",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resolve Contact Id": {
+        "main": [
+          [
+            {
+              "node": "Route Tier For Deal",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route Tier For Deal": {
+        "main": [
+          [
+            {
+              "node": "Create HubSpot Deal",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Build Slack Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Create HubSpot Deal": {
+        "main": [
+          [
+            {
+              "node": "Build Slack Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Slack Message": {
+        "main": [
+          [
+            {
+              "node": "Slack Notify Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Slack Notify Agent": {
+        "main": [
+          [
+            {
+              "node": "Mark Handed Off",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mark Handed Off": {
+        "main": [
+          [
+            {
+              "node": "Log Handoff Complete",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "errorWorkflow": "8lWcGsY178OA0ePk"
+    },
+    "staticData": null,
+    "meta": null,
+    "nodeGroups": [],
+    "pinData": null,
+    "versionId": "2f5e416b-7a30-4b9b-a57b-28b18d84830f",
+    "activeVersionId": "2f5e416b-7a30-4b9b-a57b-28b18d84830f",
+    "versionCounter": 6,
+    "triggerCount": 1,
+    "sourceWorkflowId": null,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-07-26T13:09:13.160Z",
+        "createdAt": "2026-07-26T13:09:13.160Z",
+        "role": "workflow:owner",
+        "workflowId": "Qmm3RSGitJS4M1Ph",
+        "projectId": "uJ6EDQaWqVXaXtZI",
+        "project": {
+          "updatedAt": "2025-11-10T13:05:51.471Z",
+          "createdAt": "2025-11-10T12:46:35.987Z",
+          "id": "uJ6EDQaWqVXaXtZI",
+          "name": "Hussein Rmaity <hussienremaity@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "customTelemetryTags": [],
+          "creatorId": "937f08f5-776e-4dbd-9f34-a3769190a477"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]

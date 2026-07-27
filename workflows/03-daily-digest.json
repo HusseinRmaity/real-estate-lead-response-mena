@@ -1,0 +1,335 @@
+[
+  {
+    "updatedAt": "2026-07-26T20:22:41.679Z",
+    "createdAt": "2026-07-26T20:19:55.475Z",
+    "id": "KFKndFsu9NI2Lmb5",
+    "name": "03 - Daily Digest",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "id": "sched",
+        "name": "Every Day 08:00",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          220
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "days",
+                "daysInterval": 1,
+                "triggerAtHour": 8,
+                "triggerAtMinute": 0
+              }
+            ]
+          }
+        },
+        "notes": "Fires daily at 08:00 in the workflow timezone (Asia/Dubai - largest MENA market; documented in decisions.md). Reports the previous full day."
+      },
+      {
+        "id": "manual",
+        "name": "Run Now (manual)",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          400
+        ],
+        "parameters": {},
+        "notes": "Manual on-demand digest (6.4 validation)."
+      },
+      {
+        "id": "compute-window",
+        "name": "Compute Window",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          240,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const zone = 'Asia/Dubai';\nconst todayStart = $now.setZone(zone).startOf('day');\nconst p_end = todayStart.toISO();\nconst p_start = todayStart.minus({ days: 1 }).toISO();\nreturn [{ json: { p_start, p_end, zone } }];"
+        },
+        "notes": "Yesterday's [00:00, 00:00) window in Asia/Dubai. Passed as named args to the case1_daily_digest RPC."
+      },
+      {
+        "id": "fetch-stats",
+        "name": "Fetch Digest Stats",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          460,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/rpc/case1_daily_digest",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ p_start: $json.p_start, p_end: $json.p_end }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1500,
+        "alwaysOutputData": true,
+        "notes": "One RPC call returns the full day's aggregates as a single JSON object (no raw rows over the wire). neverError so a DB blip degrades gracefully."
+      },
+      {
+        "id": "build-digest",
+        "name": "Build Digest Message",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          680,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const resp = ($json.body !== undefined) ? $json.body : $json;\nconst s = Array.isArray(resp) ? (resp[0] || {}) : (resp || {});\nconst intent = s.by_intent || {};\nconst tier = s.by_tier || {};\nconst fmtMap = (m) => { const ks = Object.keys(m); return ks.length ? ks.map(k => k + ': ' + m[k]).join('   ') : 'none'; };\nconst start = s.window_start ? String(s.window_start).slice(0, 10) : '';\nconst received = s.leads_received || 0;\nconst handedOff = s.handed_off || 0;\nconst qualifying = s.qualifying || 0;\nconst dead = s.dead || 0;\nconst runsTotal = s.runs_total || 0;\nconst runsPartial = s.runs_partial || 0;\nconst runsFailed = s.runs_failed || 0;\nconst errors = s.errors || [];\n\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: 'Daily lead digest - ' + start, emoji: false } },\n  { type: 'section', fields: [\n    { type: 'mrkdwn', text: '*Leads received:*\\n' + received },\n    { type: 'mrkdwn', text: '*Handed off to agents:*\\n' + handedOff },\n    { type: 'mrkdwn', text: '*Still qualifying:*\\n' + qualifying },\n    { type: 'mrkdwn', text: '*Closed (no reply / opt-out):*\\n' + dead }\n  ]},\n  { type: 'section', fields: [\n    { type: 'mrkdwn', text: '*By intent:*\\n' + fmtMap(intent) },\n    { type: 'mrkdwn', text: '*By tier (scored):*\\n' + fmtMap(tier) }\n  ]},\n  { type: 'section', fields: [\n    { type: 'mrkdwn', text: '*Runs logged:*\\n' + runsTotal },\n    { type: 'mrkdwn', text: '*Partial / Failed:*\\n' + runsPartial + ' / ' + runsFailed }\n  ]}\n];\nif (errors.length) {\n  const lines = errors.slice(0, 5).map(e => '- ' + (e.workflow || '?') + ' / ' + (e.step || '?') + ' - ' + String(e.error || '').slice(0, 120)).join('\\n');\n  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: '*Failures:*\\n' + lines } });\n} else {\n  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: 'No failed runs in the window.' }] });\n}\n\nconst text = 'Daily lead digest ' + start + ': ' + received + ' leads, ' + handedOff + ' handed off, ' + runsFailed + ' failures';\nconst slack_body = { channel: '#leads', text: text, blocks: blocks };\nreturn [{ json: { slack_body, stats: s } }];"
+        },
+        "notes": "Formats the RPC aggregates into a #leads Block Kit digest. Defensive: handles RPC body returned as object or single-element array."
+      },
+      {
+        "id": "post-slack",
+        "name": "Post Digest To Slack",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          900,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://slack.com/api/chat.postMessage",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "slackApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($('Build Digest Message').item.json.slack_body) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "credentials": {
+          "slackApi": {
+            "id": "du5bPExqejoLC4AW",
+            "name": "Slack account 2"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 4,
+        "waitBetweenTries": 3000,
+        "alwaysOutputData": true,
+        "notes": "Posts the digest to #leads via chat.postMessage (bot token). Same hardening as the M5 Slack node (4 tries / 3s / 15s)."
+      },
+      {
+        "id": "log-digest",
+        "name": "Log Digest Run",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1120,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify((function(){ var slack=$('Post Digest To Slack').item.json; var sb=(slack&&slack.body)?slack.body:slack; var ok=!!(sb&&sb.ok); var s=$('Build Digest Message').item.json.stats||{}; return { workflow_name:'03 - Daily Digest', execution_id:$execution.id, lead_id:null, status: ok?'success':'partial', step_name:'daily_digest', metadata:{ slack_ok:ok, window_start:s.window_start, leads_received:s.leads_received, handed_off:s.handed_off, runs_failed:s.runs_failed } }; })()) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "Terminal: records the digest run (status=partial if Slack failed)."
+      },
+      {
+        "id": "sticky-03",
+        "name": "Note - daily digest",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -40,
+          40
+        ],
+        "parameters": {
+          "width": 700,
+          "height": 150,
+          "content": "## 03 - Daily Digest\nEvery day 08:00 Asia/Dubai (or run manually), aggregates the PREVIOUS day via the case1_daily_digest Postgres RPC (one call, aggregation in SQL) and posts a #leads summary: leads received, intent/tier breakdown, handoffs, and run health (partial/failed + failure list). This is the safety net that surfaces degraded (partial) runs that were handled gracefully and never hit the #automation-errors channel."
+        }
+      }
+    ],
+    "connections": {
+      "Every Day 08:00": {
+        "main": [
+          [
+            {
+              "node": "Compute Window",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Run Now (manual)": {
+        "main": [
+          [
+            {
+              "node": "Compute Window",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Compute Window": {
+        "main": [
+          [
+            {
+              "node": "Fetch Digest Stats",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch Digest Stats": {
+        "main": [
+          [
+            {
+              "node": "Build Digest Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Digest Message": {
+        "main": [
+          [
+            {
+              "node": "Post Digest To Slack",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Post Digest To Slack": {
+        "main": [
+          [
+            {
+              "node": "Log Digest Run",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "timezone": "Asia/Dubai",
+      "errorWorkflow": "8lWcGsY178OA0ePk"
+    },
+    "staticData": {
+      "node:Every Day 08:00": {
+        "recurrenceRules": [
+          null
+        ],
+        "recurrenceRuleSignatures": [
+          null
+        ]
+      }
+    },
+    "meta": null,
+    "nodeGroups": [],
+    "pinData": null,
+    "versionId": "56b44b61-0ba7-4993-83ad-0a05442768e3",
+    "activeVersionId": "56b44b61-0ba7-4993-83ad-0a05442768e3",
+    "versionCounter": 4,
+    "triggerCount": 1,
+    "sourceWorkflowId": null,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-07-26T20:19:55.478Z",
+        "createdAt": "2026-07-26T20:19:55.478Z",
+        "role": "workflow:owner",
+        "workflowId": "KFKndFsu9NI2Lmb5",
+        "projectId": "uJ6EDQaWqVXaXtZI",
+        "project": {
+          "updatedAt": "2025-11-10T13:05:51.471Z",
+          "createdAt": "2025-11-10T12:46:35.987Z",
+          "id": "uJ6EDQaWqVXaXtZI",
+          "name": "Hussein Rmaity <hussienremaity@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "customTelemetryTags": [],
+          "creatorId": "937f08f5-776e-4dbd-9f34-a3769190a477"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]

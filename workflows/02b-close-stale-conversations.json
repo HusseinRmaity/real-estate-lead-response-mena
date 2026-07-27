@@ -1,0 +1,244 @@
+[
+  {
+    "updatedAt": "2026-07-26T20:12:21.123Z",
+    "createdAt": "2026-07-26T13:10:02.188Z",
+    "id": "YuCbQzFpV7yBAuI0",
+    "name": "02b - Close Stale Conversations",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "id": "cron-hourly",
+        "name": "Every Hour",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          300
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "hours",
+                "hoursInterval": 1
+              }
+            ]
+          }
+        },
+        "notes": "Hourly sweep. Enforces the 48h silence timeout that the reply handler (event-driven) cannot: a lead that goes quiet never triggers 02."
+      },
+      {
+        "id": "close-stale",
+        "name": "Close Stale Leads",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          220,
+          300
+        ],
+        "parameters": {
+          "method": "PATCH",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "status",
+                "value": "eq.qualifying"
+              },
+              {
+                "name": "updated_at",
+                "value": "=lt.{{ $now.minus({ hours: 48 }).toISO() }}"
+              },
+              {
+                "name": "select",
+                "value": "id,whatsapp_number,language,updated_at"
+              }
+            ]
+          },
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=representation"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ status: 'dead' }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true,
+        "notes": "PATCH qualifying leads whose updated_at is older than 48h -> dead. updated_at is auto-touched on every lead update, so it tracks last conversation activity. return=representation => body is the array of closed rows for per-lead logging. A reply within 7d can still reopen a dead lead (02 re-engagement branch)."
+      },
+      {
+        "id": "split-closed",
+        "name": "Split Closed Leads",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          440,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const rows = ($json && $json.body && Array.isArray($json.body)) ? $json.body : [];\nreturn rows.map(function(r){ return { json: { lead_id: r.id, whatsapp_number: r.whatsapp_number || null, language: r.language || null, was_updated_at: r.updated_at || null } }; });"
+        },
+        "notes": "Fans the closed-rows array out to one item per lead so Log Each Closure writes one run_logs row per closure. Zero closed => zero items => no logs (clean no-op hour)."
+      },
+      {
+        "id": "log-closure",
+        "name": "Log Each Closure",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          660,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ workflow_name: '02b - Close Stale Conversations', execution_id: $execution.id, lead_id: $json.lead_id, status: 'success', step_name: 'close_stale_48h', metadata: { whatsapp_number: $json.whatsapp_number, language: $json.language, was_updated_at: $json.was_updated_at, note: 'auto-closed after 48h of silence; reopenable within 7d on reply' } }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "One run_logs row per auto-closed lead (observability, production standard 4)."
+      }
+    ],
+    "connections": {
+      "Every Hour": {
+        "main": [
+          [
+            {
+              "node": "Close Stale Leads",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Close Stale Leads": {
+        "main": [
+          [
+            {
+              "node": "Split Closed Leads",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Split Closed Leads": {
+        "main": [
+          [
+            {
+              "node": "Log Each Closure",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "errorWorkflow": "8lWcGsY178OA0ePk"
+    },
+    "staticData": {
+      "node:Every Hour": {
+        "recurrenceRules": [
+          null
+        ],
+        "recurrenceRuleSignatures": [
+          null
+        ]
+      }
+    },
+    "meta": null,
+    "nodeGroups": [],
+    "pinData": null,
+    "versionId": "436e3df6-ae5b-4755-9909-b2cf23edea46",
+    "activeVersionId": "436e3df6-ae5b-4755-9909-b2cf23edea46",
+    "versionCounter": 4,
+    "triggerCount": 1,
+    "sourceWorkflowId": null,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-07-26T13:10:02.193Z",
+        "createdAt": "2026-07-26T13:10:02.193Z",
+        "role": "workflow:owner",
+        "workflowId": "YuCbQzFpV7yBAuI0",
+        "projectId": "uJ6EDQaWqVXaXtZI",
+        "project": {
+          "updatedAt": "2025-11-10T13:05:51.471Z",
+          "createdAt": "2025-11-10T12:46:35.987Z",
+          "id": "uJ6EDQaWqVXaXtZI",
+          "name": "Hussein Rmaity <hussienremaity@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "customTelemetryTags": [],
+          "creatorId": "937f08f5-776e-4dbd-9f34-a3769190a477"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]

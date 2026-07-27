@@ -1,0 +1,218 @@
+[
+  {
+    "updatedAt": "2026-07-26T05:09:20.388Z",
+    "createdAt": "2026-07-26T05:05:30.414Z",
+    "id": "PFujbHV624JmnjdR",
+    "name": "00 - Health Check",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "id": "webhook-health",
+        "name": "Receive Health Check",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          0,
+          300
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "health",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "notes": "Health endpoint. No auth — reports only up/down of the dependency chain.",
+        "webhookId": "e0675856-8e6d-42cd-aaab-6bc9a1324353"
+      },
+      {
+        "id": "ping-anthropic",
+        "name": "Ping Anthropic (Haiku)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          240,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "anthropicApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "{\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 10,\n  \"messages\": [{ \"role\": \"user\", \"content\": \"ping\" }]\n}",
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "credentials": {
+          "anthropicApi": {
+            "id": "azRjMcNgGfj9c985",
+            "name": "Anthropic account"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "notes": "Trivial Haiku call proves Anthropic reachability + valid key. onError=continueRegularOutput so a dependency outage is REPORTED ('down'), not fatal. Cheapest model, max_tokens 10, 15s timeout, 2 retries.",
+        "onError": "continueRegularOutput",
+        "alwaysOutputData": true
+      },
+      {
+        "id": "ping-supabase",
+        "name": "Ping Supabase (REST Root)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          480,
+          300
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "options": {
+            "timeout": 10000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "notes": "PostgREST root ping = DB reachable. SELECT NOW() deferred to M2 (no schema yet). onError=continueRegularOutput + alwaysOutputData capture failures. 10s timeout, 2 retries.",
+        "onError": "continueRegularOutput",
+        "alwaysOutputData": true
+      },
+      {
+        "id": "build-response",
+        "name": "Build Health Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          720,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const a = $('Ping Anthropic (Haiku)').item.json;\nconst s = $('Ping Supabase (REST Root)').item.json;\nreturn [{ json: {\n  status: 'ok',\n  timestamp: new Date().toISOString(),\n  anthropic: (a && a.error) ? 'down' : 'reachable',\n  supabase: (s && s.error) ? 'down' : 'reachable'\n} }];"
+        },
+        "notes": "Combines both dependency results. A node that failed (onError) surfaces an 'error' key => 'down'."
+      },
+      {
+        "id": "respond-health",
+        "name": "Respond Health Check",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          960,
+          300
+        ],
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ $json }}"
+        },
+        "notes": "Returns combined health JSON to the caller."
+      }
+    ],
+    "connections": {
+      "Receive Health Check": {
+        "main": [
+          [
+            {
+              "node": "Ping Anthropic (Haiku)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ping Anthropic (Haiku)": {
+        "main": [
+          [
+            {
+              "node": "Ping Supabase (REST Root)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ping Supabase (REST Root)": {
+        "main": [
+          [
+            {
+              "node": "Build Health Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Health Response": {
+        "main": [
+          [
+            {
+              "node": "Respond Health Check",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "timezone": "Asia/Beirut"
+    },
+    "staticData": null,
+    "meta": null,
+    "nodeGroups": [],
+    "pinData": null,
+    "versionId": "61c798e6-693e-493c-8d45-86f486082a42",
+    "activeVersionId": "61c798e6-693e-493c-8d45-86f486082a42",
+    "versionCounter": 4,
+    "triggerCount": 1,
+    "sourceWorkflowId": null,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-07-26T05:05:30.421Z",
+        "createdAt": "2026-07-26T05:05:30.421Z",
+        "role": "workflow:owner",
+        "workflowId": "PFujbHV624JmnjdR",
+        "projectId": "uJ6EDQaWqVXaXtZI",
+        "project": {
+          "updatedAt": "2025-11-10T13:05:51.471Z",
+          "createdAt": "2025-11-10T12:46:35.987Z",
+          "id": "uJ6EDQaWqVXaXtZI",
+          "name": "Hussein Rmaity <hussienremaity@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "customTelemetryTags": [],
+          "creatorId": "937f08f5-776e-4dbd-9f34-a3769190a477"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]
