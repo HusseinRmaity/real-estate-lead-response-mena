@@ -5,6 +5,7 @@
 # docs/testing-log.md    internal QA notes + instance references
 # docs/hubspot-setup.md  HubSpot portal IDs + internal setup steps
 # docs/linkedin-posts.md marketing drafts (not repo content)
+# docs/OWNERS-GUIDE.md   internal rate card, client pitch, and build status
 # CLAUDE.md              internal working standards + personal tooling references
 # PLAN.md                internal build playbook (credential IDs, deferred notes)
 # case-study-1-mena-spec.md  contains rate-card / pricing (business-sensitive)
@@ -15,6 +16,7 @@ docs/decisions.md
 docs/testing-log.md
 docs/hubspot-setup.md
 docs/linkedin-posts.md
+docs/OWNERS-GUIDE.md
 CLAUDE.md
 PLAN.md
 case-study-1-mena-spec.md
