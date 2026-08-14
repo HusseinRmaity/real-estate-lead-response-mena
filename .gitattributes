@@ -1,0 +1,28 @@
+# Line endings are normalised to LF in the repo and on checkout.
+#
+# This machine has core.autocrlf=true, which would otherwise hand a Windows
+# clone CRLF copies of everything. The concrete consequence here is not
+# theoretical:
+#
+#   The workflow JSONs are exported byte-for-byte from the running n8n instance
+#   and re-verified against it. A checkout that silently rewrites their line
+#   endings breaks exactly the property the export process exists to guarantee.
+#
+# Backported from Case Study 3, which hit this first.
+
+* text=auto eol=lf
+
+*.json  text eol=lf
+*.js    text eol=lf
+*.sh    text eol=lf
+*.sql   text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.html  text eol=lf
+
+# Binary — never touch these.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.pdf   binary
