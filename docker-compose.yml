@@ -23,6 +23,19 @@ services:
     environment:
       - GENERIC_TIMEZONE=Asia/Beirut
       - TZ=Asia/Beirut
+      # No secrets here by design, and no loosened sandbox.
+      #
+      # Removed 2026-08-07 (Case 2, M5.8): SHOPIFY_WEBHOOK_SECRET_C2 and
+      # N8N_BLOCK_ENV_ACCESS_IN_NODE=false. They existed for a plan to compute
+      # the Shopify webhook HMAC inside a Code node; that was superseded on
+      # 2026-08-02 by the native Crypto node plus a `crypto` credential
+      # (`Shopify HMAC - Case 2`), which is where the signing secret actually
+      # lives. See case-study-2-abandoned-cart-mena/docs/decisions.md.
+      #
+      # They were not merely unused — the env var's value had drifted from the
+      # real signing secret, so a test signed with it was rejected as an HMAC
+      # mismatch and cost a test round in M5. A dead credential that still looks
+      # authoritative is worse than no credential at all.
     volumes:
       - N8N_DATA:/home/node/.n8n
 
