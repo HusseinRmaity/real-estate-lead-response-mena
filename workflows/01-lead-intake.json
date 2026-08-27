@@ -1,12 +1,9 @@
 [
   {
-    "updatedAt": "2026-07-26T20:12:05.700Z",
-    "createdAt": "2026-07-26T05:42:03.033Z",
     "id": "bszGjvdHoOOWD4z2",
-    "name": "01 - Lead Intake",
+    "name": "[CS1 Real Estate] 01 - Lead Intake",
     "description": null,
     "active": true,
-    "isArchived": false,
     "nodes": [
       {
         "parameters": {
@@ -97,7 +94,7 @@
       {
         "parameters": {
           "method": "POST",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/run_logs",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendHeaders": true,
@@ -173,7 +170,7 @@
       },
       {
         "parameters": {
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/leads",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendQuery": true,
@@ -318,7 +315,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const lead = $('Compute Dedup Key').item.json;\nconst system = [\n 'You classify inbound real-estate leads for MENA agencies. Assign ONE intent level.',\n '- \"high\" ready-to-transact: cash/pre-approved, specific building/unit, near-term timeline, request to view.',\n '- \"medium\" genuine but exploratory: named area/type without firm budget/timeline.',\n '- \"low\" casual browsing: vague, no area, no timeline.',\n '- \"junk\" spam, fake identity (nonsense name/random digits), tests, bots, unrelated.',\n 'Rules: judge substance not politeness. Fake name + no real interest => junk.',\n 'Currency is never assumed; a bare number is not a strong budget signal.',\n 'Consider Arabic (incl Arabizi), English, French equally.',\n 'Output STRICT JSON only. Shape: {\"intent\":\"high|medium|low|junk\",\"reason\":\"<=12 words\"}'\n].join('\\n');\nconst user = [\n 'Lead data:',\n '- source: ' + (lead.source || ''),\n '- name: ' + ((lead.first_name || '') + ' ' + (lead.last_name || '')).trim(),\n '- property_interest: ' + (lead.property_interest || ''),\n '- area: ' + (lead.area_of_interest || ''),\n '- message: ' + (lead.message || '')\n].join('\\n');\nconst body = { model: 'claude-haiku-4-5-20251001', max_tokens: 80, system, messages: [{ role: 'user', content: user }] };\nreturn [{ json: { anthropic_body: body } }];"
+          "jsCode": "const lead = $('Compute Dedup Key').item.json;\nconst system = [\n 'You classify inbound real-estate leads for MENA agencies (Dubai, Riyadh, Beirut, Cairo, Amman, Doha). Assign ONE intent level.',\n 'Levels:',\n '- \"high\" ready-to-transact: cash or pre-approved financing, a specific building or unit, an explicit near-term timeline (\"this week\", \"before month end\"), a concrete budget, or a request to view.',\n '- \"medium\" genuine but exploratory: names an area, a property type, or a building - even with exploratory wording such as \"thinking about\", \"comparing options\", \"considering\", \"looking into\".',\n '- \"low\" casual browsing only: no area AND no property type AND no budget AND no timeline (e.g. \"just checking prices\", \"how much are apartments\").',\n '- \"junk\" spam, fake identity (nonsense name/random digits), tests, bots, unrelated.',\n 'Rules:',\n '- Judge substance, not politeness or message length.',\n '- Exploratory wording alone NEVER downgrades a lead that names an area, a property type or a building.',\n '- Missing budget alone does not make a lead \"low\" if other signals exist.',\n '- Currency is never assumed; a bare number is a medium-strength budget signal at best.',\n '- Fake or nonsensical name plus no real interest => junk.',\n '- Consider Arabic (incl Arabizi), English and French equally.',\n '- TIE-BREAK: if torn between \"low\" and \"medium\", output \"medium\". An unnecessary message costs a fraction of a cent; a missed buyer costs a sale.',\n 'Examples:',\n '- \"Cash buyer, need viewing this week\" + Marina 2BR => {\"intent\":\"high\",\"reason\":\"cash buyer, specific unit, urgent viewing\"}',\n '- \"Interested in Marina area, thinking about a 2BR\" => {\"intent\":\"medium\",\"reason\":\"named area, exploratory, no budget/timeline\"}',\n '- \"Thinking about buying a 2-bed, comparing options\" => {\"intent\":\"medium\",\"reason\":\"named property type, exploratory wording\"}',\n '- \"Just browsing prices\" => {\"intent\":\"low\",\"reason\":\"casual browsing, no specifics\"}',\n '- name \"asdf qwerty\", message \"test 12345\" => {\"intent\":\"junk\",\"reason\":\"fake name, test content\"}',\n 'Output STRICT JSON only. No prose, no markdown, no code fences. Shape: {\"intent\":\"high|medium|low|junk\",\"reason\":\"<=12 words\"}'\n].join('\n');\nconst user = [\n 'Lead data:',\n '- source: ' + (lead.source || ''),\n '- name: ' + ((lead.first_name || '') + ' ' + (lead.last_name || '')).trim(),\n '- property_interest: ' + (lead.property_interest || ''),\n '- area: ' + (lead.area_of_interest || ''),\n '- message: ' + (lead.message || '')\n].join('\n');\nconst body = { model: 'claude-haiku-4-5-20251001', max_tokens: 80, system, messages: [{ role: 'user', content: user }] };\nreturn [{ json: { anthropic_body: body } }];"
         },
         "id": "build-intent-request",
         "name": "Build Intent Request",
@@ -328,7 +325,7 @@
           2160,
           304
         ],
-        "notes": "Builds the Haiku intent-classification request (prompts/intent-classifier.md v1). Pulls lead fields from Compute Dedup Key (the HTTP nodes overwrite $json with their own response)."
+        "notes": "Builds the Haiku intent-classification request (prompts/intent-classifier.md v2, 2026-08-21). Pulls lead fields from Compute Dedup Key (the HTTP nodes overwrite $json with their own response). v2 restored the exploratory-wording clause and the worked examples, which the v1 node paraphrase had dropped, and added the low/medium tie-break to medium."
       },
       {
         "parameters": {
@@ -390,7 +387,7 @@
       {
         "parameters": {
           "method": "POST",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/leads",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendHeaders": true,
@@ -474,7 +471,7 @@
       {
         "parameters": {
           "method": "POST",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/run_logs",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendHeaders": true,
@@ -522,7 +519,7 @@
       {
         "parameters": {
           "method": "PATCH",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/leads",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendQuery": true,
@@ -579,7 +576,7 @@
       {
         "parameters": {
           "method": "POST",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/run_logs",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendHeaders": true,
@@ -669,7 +666,7 @@
         ],
         "parameters": {
           "method": "GET",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/send_windows",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/send_windows",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendQuery": true,
@@ -926,7 +923,7 @@
         ],
         "parameters": {
           "method": "PATCH",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/leads",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendQuery": true,
@@ -983,7 +980,7 @@
         ],
         "parameters": {
           "method": "POST",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/conversations",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/conversations",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendHeaders": true,
@@ -1031,7 +1028,7 @@
         ],
         "parameters": {
           "method": "POST",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/run_logs",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendHeaders": true,
@@ -1418,34 +1415,6 @@
     "nodeGroups": [],
     "pinData": {},
     "versionId": "635c159f-210d-4444-83a4-2eaa679a7df7",
-    "activeVersionId": "635c159f-210d-4444-83a4-2eaa679a7df7",
-    "versionCounter": 8,
-    "triggerCount": 1,
-    "sourceWorkflowId": null,
-    "tags": [],
-    "shared": [
-      {
-        "updatedAt": "2026-07-26T05:42:03.037Z",
-        "createdAt": "2026-07-26T05:42:03.037Z",
-        "role": "workflow:owner",
-        "workflowId": "bszGjvdHoOOWD4z2",
-        "projectId": "uJ6EDQaWqVXaXtZI",
-        "project": {
-          "updatedAt": "2025-11-10T13:05:51.471Z",
-          "createdAt": "2025-11-10T12:46:35.987Z",
-          "id": "uJ6EDQaWqVXaXtZI",
-          "name": "Hussein Rmaity <hussienremaity@gmail.com>",
-          "type": "personal",
-          "icon": null,
-          "description": null,
-          "customTelemetryTags": [],
-          "creatorId": "937f08f5-776e-4dbd-9f34-a3769190a477"
-        }
-      }
-    ],
-    "versionMetadata": {
-      "name": null,
-      "description": null
-    }
+    "tags": []
   }
 ]

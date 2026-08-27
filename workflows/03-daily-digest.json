@@ -1,12 +1,9 @@
 [
   {
-    "updatedAt": "2026-07-26T20:22:41.679Z",
-    "createdAt": "2026-07-26T20:19:55.475Z",
     "id": "KFKndFsu9NI2Lmb5",
-    "name": "03 - Daily Digest",
+    "name": "[CS1 Real Estate] 03 - Daily Digest",
     "description": null,
     "active": true,
-    "isArchived": false,
     "nodes": [
       {
         "id": "sched",
@@ -68,7 +65,7 @@
         ],
         "parameters": {
           "method": "POST",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/rpc/case1_daily_digest",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/rpc/case1_daily_digest",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendBody": true,
@@ -162,7 +159,7 @@
         ],
         "parameters": {
           "method": "POST",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/run_logs",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendHeaders": true,
@@ -302,34 +299,6 @@
     "nodeGroups": [],
     "pinData": null,
     "versionId": "56b44b61-0ba7-4993-83ad-0a05442768e3",
-    "activeVersionId": "56b44b61-0ba7-4993-83ad-0a05442768e3",
-    "versionCounter": 4,
-    "triggerCount": 1,
-    "sourceWorkflowId": null,
-    "tags": [],
-    "shared": [
-      {
-        "updatedAt": "2026-07-26T20:19:55.478Z",
-        "createdAt": "2026-07-26T20:19:55.478Z",
-        "role": "workflow:owner",
-        "workflowId": "KFKndFsu9NI2Lmb5",
-        "projectId": "uJ6EDQaWqVXaXtZI",
-        "project": {
-          "updatedAt": "2025-11-10T13:05:51.471Z",
-          "createdAt": "2025-11-10T12:46:35.987Z",
-          "id": "uJ6EDQaWqVXaXtZI",
-          "name": "Hussein Rmaity <hussienremaity@gmail.com>",
-          "type": "personal",
-          "icon": null,
-          "description": null,
-          "customTelemetryTags": [],
-          "creatorId": "937f08f5-776e-4dbd-9f34-a3769190a477"
-        }
-      }
-    ],
-    "versionMetadata": {
-      "name": null,
-      "description": null
-    }
+    "tags": []
   }
 ]

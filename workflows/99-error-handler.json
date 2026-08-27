@@ -1,12 +1,9 @@
 [
   {
-    "updatedAt": "2026-07-26T20:11:56.693Z",
-    "createdAt": "2026-07-26T20:11:36.675Z",
     "id": "8lWcGsY178OA0ePk",
-    "name": "99 - Error Handler",
+    "name": "[CS1 Real Estate] 99 - Error Handler",
     "description": null,
     "active": true,
-    "isArchived": false,
     "nodes": [
       {
         "id": "error-trigger",
@@ -45,7 +42,7 @@
         ],
         "parameters": {
           "method": "POST",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/run_logs",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendHeaders": true,
@@ -181,34 +178,6 @@
     "nodeGroups": [],
     "pinData": null,
     "versionId": "d04423be-e8d1-463b-ae19-54fd92439ba7",
-    "activeVersionId": "d04423be-e8d1-463b-ae19-54fd92439ba7",
-    "versionCounter": 1,
-    "triggerCount": 0,
-    "sourceWorkflowId": null,
-    "tags": [],
-    "shared": [
-      {
-        "updatedAt": "2026-07-26T20:11:36.678Z",
-        "createdAt": "2026-07-26T20:11:36.678Z",
-        "role": "workflow:owner",
-        "workflowId": "8lWcGsY178OA0ePk",
-        "projectId": "uJ6EDQaWqVXaXtZI",
-        "project": {
-          "updatedAt": "2025-11-10T13:05:51.471Z",
-          "createdAt": "2025-11-10T12:46:35.987Z",
-          "id": "uJ6EDQaWqVXaXtZI",
-          "name": "Hussein Rmaity <hussienremaity@gmail.com>",
-          "type": "personal",
-          "icon": null,
-          "description": null,
-          "customTelemetryTags": [],
-          "creatorId": "937f08f5-776e-4dbd-9f34-a3769190a477"
-        }
-      }
-    ],
-    "versionMetadata": {
-      "name": null,
-      "description": null
-    }
+    "tags": []
   }
 ]

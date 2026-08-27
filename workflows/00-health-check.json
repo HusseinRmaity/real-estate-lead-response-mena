@@ -1,12 +1,9 @@
 [
   {
-    "updatedAt": "2026-07-26T05:09:20.388Z",
-    "createdAt": "2026-07-26T05:05:30.414Z",
     "id": "PFujbHV624JmnjdR",
-    "name": "00 - Health Check",
+    "name": "[CS1 Real Estate] 00 - Health Check",
     "description": null,
     "active": true,
-    "isArchived": false,
     "nodes": [
       {
         "id": "webhook-health",
@@ -80,7 +77,7 @@
         ],
         "parameters": {
           "method": "GET",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "options": {
@@ -185,34 +182,6 @@
     "nodeGroups": [],
     "pinData": null,
     "versionId": "61c798e6-693e-493c-8d45-86f486082a42",
-    "activeVersionId": "61c798e6-693e-493c-8d45-86f486082a42",
-    "versionCounter": 4,
-    "triggerCount": 1,
-    "sourceWorkflowId": null,
-    "tags": [],
-    "shared": [
-      {
-        "updatedAt": "2026-07-26T05:05:30.421Z",
-        "createdAt": "2026-07-26T05:05:30.421Z",
-        "role": "workflow:owner",
-        "workflowId": "PFujbHV624JmnjdR",
-        "projectId": "uJ6EDQaWqVXaXtZI",
-        "project": {
-          "updatedAt": "2025-11-10T13:05:51.471Z",
-          "createdAt": "2025-11-10T12:46:35.987Z",
-          "id": "uJ6EDQaWqVXaXtZI",
-          "name": "Hussein Rmaity <hussienremaity@gmail.com>",
-          "type": "personal",
-          "icon": null,
-          "description": null,
-          "customTelemetryTags": [],
-          "creatorId": "937f08f5-776e-4dbd-9f34-a3769190a477"
-        }
-      }
-    ],
-    "versionMetadata": {
-      "name": null,
-      "description": null
-    }
+    "tags": []
   }
 ]

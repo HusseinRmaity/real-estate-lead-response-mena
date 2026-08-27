@@ -1,12 +1,9 @@
 [
   {
-    "updatedAt": "2026-07-26T20:12:21.123Z",
-    "createdAt": "2026-07-26T13:10:02.188Z",
     "id": "YuCbQzFpV7yBAuI0",
-    "name": "02b - Close Stale Conversations",
+    "name": "[CS1 Real Estate] 02b - Close Stale Conversations",
     "description": null,
     "active": true,
-    "isArchived": false,
     "nodes": [
       {
         "id": "cron-hourly",
@@ -40,7 +37,7 @@
         ],
         "parameters": {
           "method": "PATCH",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/leads",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/leads",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendQuery": true,
@@ -120,7 +117,7 @@
         ],
         "parameters": {
           "method": "POST",
-          "url": "https://zocsluxabpnxmzjhwqky.supabase.co/rest/v1/run_logs",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/run_logs",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "supabaseApi",
           "sendHeaders": true,
@@ -156,6 +153,396 @@
         "waitBetweenTries": 1000,
         "alwaysOutputData": true,
         "notes": "One run_logs row per auto-closed lead (observability, production standard 4)."
+      },
+      {
+        "parameters": {
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "status",
+                "value": "eq.qualifying"
+              },
+              {
+                "name": "nudged_at",
+                "value": "is.null"
+              },
+              {
+                "name": "and",
+                "value": "=(updated_at.lt.{{ $now.minus({ hours: 24 }).toUTC().toISO() }},updated_at.gte.{{ $now.minus({ hours: 48 }).toUTC().toISO() }})"
+              },
+              {
+                "name": "select",
+                "value": "id,first_name,whatsapp_number,language,country_code,property_interest,area_of_interest,budget_max,currency,timeline,updated_at,conversations(direction,message,turn_number)"
+              },
+              {
+                "name": "limit",
+                "value": "50"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "98c1b931-8323-4d7b-aa1d-16b3e3cb0156",
+        "name": "Find Nudge Candidates",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          220,
+          60
+        ],
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true,
+        "notes": "Leads silent 24-48h, not yet nudged. The 48h upper bound keeps this DISJOINT from the close sweep, so a lead is never nudged and closed in the same hour. conversations(...) is embedded so the transcript arrives in one call (no N+1). limit 50 caps the hourly batch (production standard 8)."
+      },
+      {
+        "parameters": {
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/send_windows",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "select",
+                "value": "*"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "id": "e907980f-16a6-42cf-a374-40ef2f80883b",
+        "name": "Load Send Windows",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          440,
+          60
+        ],
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "All country send-window rows in one call, used to test each lead's LOCAL time."
+      },
+      {
+        "parameters": {
+          "jsCode": "const candResp = $('Find Nudge Candidates').first().json;\nconst winResp = $('Load Send Windows').first().json;\nconst leads = (candResp && Array.isArray(candResp.body)) ? candResp.body : [];\nconst windows = (winResp && Array.isArray(winResp.body)) ? winResp.body : [];\n\nconst byCountry = {};\nwindows.forEach(function (w) { byCountry[w.country_code] = w; });\n\n// Same default as 01's Resolve Send Context: an unseeded country falls back to AE.\nconst DEFAULT = byCountry['AE'] || { timezone: 'Asia/Dubai', quiet_hours_start: '22:00:00', quiet_hours_end: '08:00:00' };\n\nfunction toMinutes(s) { const p = String(s || '00:00:00').split(':'); return (parseInt(p[0], 10) * 60) + parseInt(p[1] || '0', 10); }\n\nconst out = [];\nconst skipped = [];\n\nleads.forEach(function (l) {\n  const w = byCountry[l.country_code] || DEFAULT;\n  const tz = w.timezone || 'Asia/Dubai';\n  const local = DateTime.now().setZone(tz);\n  const mins = (local.hour * 60) + local.minute;\n  const qs = toMinutes(w.quiet_hours_start);\n  const qe = toMinutes(w.quiet_hours_end);\n  // Quiet hours wrap midnight (22:00 -> 08:00), so start > end means the window spans days.\n  const inQuiet = (qs > qe) ? (mins >= qs || mins < qe) : (mins >= qs && mins < qe);\n  if (inQuiet) {\n    skipped.push({ lead_id: l.id, reason: 'quiet_hours', local_time: local.toFormat('HH:mm'), tz: tz });\n    return;\n  }\n  const convos = Array.isArray(l.conversations) ? l.conversations : [];\n  const transcript = convos.slice()\n    .sort(function (a, b) { return (a.turn_number || 0) - (b.turn_number || 0); })\n    .map(function (c) { return (c.direction === 'outbound' ? 'A: ' : 'L: ') + (c.message || ''); })\n    .join('\\n');\n  out.push({ json: {\n    lead_id: l.id,\n    first_name: l.first_name || '',\n    whatsapp_number: l.whatsapp_number,\n    language: l.language || 'en',\n    country_code: l.country_code || null,\n    timezone: tz,\n    local_time: local.toFormat('HH:mm'),\n    property_interest: l.property_interest || '',\n    area_of_interest: l.area_of_interest || '',\n    budget_max: (l.budget_max == null ? '' : l.budget_max),\n    currency: l.currency || '',\n    timeline: l.timeline || '',\n    silent_since: l.updated_at,\n    turn_count: convos.length,\n    transcript: transcript\n  } });\n});\n\n// Attach the skip tally to every surviving item so the run log can report it.\nout.forEach(function (o) { o.json.skipped_quiet_hours = skipped.length; });\n\n// Zero nudgeable leads => zero items => the whole branch no-ops silently, exactly like the\n// close branch does on a quiet hour. Leads skipped for quiet hours are simply retried next hour.\nreturn out;"
+        },
+        "id": "348947c5-0485-4f12-8194-bb8e8df5f19d",
+        "name": "Select Nudgeable Leads",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          660,
+          60
+        ],
+        "notes": "Filters candidates to those whose LOCAL time is outside quiet hours (22:00-08:00 per country, wrap-around handled). A batch sweep cannot use 01's Wait-node pattern - parking the hourly cron would stall it - so out-of-window leads are just left for the next run. DELIBERATELY ignores weekend_days: the nudge window is only 24-48h, so skipping a Gulf Fri-Sat or Levant Sat-Sun would mean many leads are closed having never been nudged. Prayer-time delay is also skipped: a non-urgent follow-up does not justify an aladhan call per lead per hour."
+      },
+      {
+        "parameters": {
+          "jsCode": "return $input.all().map(function (item) {\n  const l = item.json;\n  const system = [\n    'You write ONE short WhatsApp follow-up to a real-estate lead in MENA who stopped replying about 24 hours ago. If they stay silent the agency closes the conversation.',\n    'Write ONLY the message text. No JSON, no quotes, no preamble, no sign-off.',\n    'LANGUAGE: write in the lead language given below (ar | en | fr | mixed). ar = natural Arabic in the country register (Gulf / Levant / Egyptian).',\n    'CULTURAL (non-negotiable): no religious phrasing, and never in-sha-Allah for timing. Neutral greeting (marhaba / Hello / Bonjour). Currency is NEVER assumed. Formality by tone: casual or short history => informal Arabic anta; formal or business => hadretak; unsure => lean respectful.',\n    'CONTENT: reference the specific thing they were actually discussing (area, property type, budget only if they stated one). Ask ONE light question that makes replying easy. Never invent facts. No pressure, no hype, no discounts, no promises about timing, and do NOT say the conversation is about to be closed.',\n    'LENGTH: under 300 characters. At most one tasteful emoji, and only if the transcript is casual.'\n  ].join('\\n');\n  const budget = (l.budget_max === '' || l.budget_max === null)\n    ? '(none given)'\n    : (l.budget_max + ' ' + (l.currency || '(currency not stated)'));\n  const user = [\n    'Lead: ' + (l.first_name || '(no name)'),\n    'Language: ' + l.language,\n    'Country: ' + (l.country_code || '(unknown)'),\n    'Looking for: ' + (l.property_interest || '(unspecified)'),\n    'Area: ' + (l.area_of_interest || '(unspecified)'),\n    'Budget: ' + budget,\n    'Timeline: ' + (l.timeline || '(none given)'),\n    '',\n    'Conversation so far (A = agency, L = lead):',\n    (l.transcript || '(only the first acknowledgment was sent; the lead never replied)'),\n    '',\n    'Write the follow-up message now.'\n  ].join('\\n');\n  const body = { model: 'claude-haiku-4-5-20251001', max_tokens: 200, system: system, messages: [{ role: 'user', content: user }] };\n  return { json: Object.assign({}, l, { anthropic_body: body }) };\n});"
+        },
+        "id": "93445821-f843-47eb-8eb8-e78c0b1582c9",
+        "name": "Build Nudge Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          880,
+          60
+        ],
+        "notes": "Haiku 4.5 writes the nudge fresh per lead so it can reference what was actually discussed. Carries every lead field forward alongside anthropic_body so downstream nodes never need a second lookup. Cultural rules mirror prompts/conversation-handler.md."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "anthropicApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.anthropic_body) }}",
+          "options": {
+            "timeout": 20000
+          }
+        },
+        "id": "aec4f081-19b6-4a4f-b884-19dc8e0849a0",
+        "name": "Generate Nudge (Haiku)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1100,
+          60
+        ],
+        "credentials": {
+          "anthropicApi": {
+            "id": "azRjMcNgGfj9c985",
+            "name": "Anthropic account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true,
+        "notes": "20s timeout, 2 retries, Continue-On-Fail. A model outage must not stop the nudge - Parse Nudge falls back to a static per-language template and flags nudge_degraded."
+      },
+      {
+        "parameters": {
+          "jsCode": "const sources = $('Build Nudge Request').all();\nreturn $input.all().map(function (item, i) {\n  const src = (sources[i] && sources[i].json) ? sources[i].json : {};\n  let text = '';\n  let degraded = true;\n  try {\n    const data = (item.json && item.json.body) ? item.json.body : item.json;\n    if (data && Array.isArray(data.content)) {\n      const tb = data.content.find(function (b) { return b && b.type === 'text' && b.text; });\n      if (tb) { text = String(tb.text).trim(); if (text) degraded = false; }\n    }\n  } catch (e) {}\n  if (!text) {\n    // Static fallback, used only when the model call failed or returned nothing.\n    const nm = src.first_name ? (' ' + src.first_name) : '';\n    const tmpl = {\n      ar: 'مرحبا' + nm + '، حابين نطمن عليك بخصوص بحثك عن العقار. لسا عم تدور؟ نحنا جاهزين نساعدك وقت ما تكون جاهز.',\n      fr: 'Bonjour' + nm + ', toujours a la recherche ? Nous restons a votre disposition quand vous voulez.',\n      en: 'Hi' + nm + ', just checking in on your property search. Still looking? Happy to help whenever you are ready.'\n    };\n    text = tmpl[src.language] || tmpl.en;\n  }\n  if (text.length > 300) text = text.slice(0, 297) + '…';\n  return { json: Object.assign({}, src, { nudge_message: text, nudge_degraded: degraded }) };\n});"
+        },
+        "id": "7e21626c-8dd6-43f5-bedc-4846aade411f",
+        "name": "Parse Nudge",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1320,
+          60
+        ],
+        "notes": "Extracts the text block. On any failure falls back to a static per-language template (ar/fr/en) and sets nudge_degraded=true, which the run log records as status=partial. The Arabic fallback string is pending native review."
+      },
+      {
+        "parameters": {
+          "resource": "sms",
+          "operation": "send",
+          "from": "+14155238886",
+          "to": "={{ $json.whatsapp_number }}",
+          "toWhatsapp": true,
+          "message": "={{ $json.nudge_message }}"
+        },
+        "id": "7d681df1-f741-46cf-bc79-8b35498b6532",
+        "name": "Send Nudge",
+        "type": "n8n-nodes-base.twilio",
+        "typeVersion": 1,
+        "position": [
+          1540,
+          60
+        ],
+        "credentials": {
+          "twilioApi": {
+            "id": "i6W4hkBVTg5L0D9v",
+            "name": "Twilio account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true,
+        "notes": "Continue-On-Fail: a Twilio outage must never stop the lead being marked as nudged, or the sweep would retry the same lead every hour."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/conversations",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ lead_id: $('Parse Nudge').item.json.lead_id, direction: 'outbound', channel: 'whatsapp', message: $('Parse Nudge').item.json.nudge_message, twilio_message_id: ($json.sid || null), turn_number: ($('Parse Nudge').item.json.turn_count + 1) }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "id": "efc234e4-9eb3-4d91-a434-46938ad1ffcd",
+        "name": "Log Nudge Outbound",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1760,
+          60
+        ],
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "The nudge becomes a normal outbound conversation row, so it appears in the transcript the scorer and any later turn will read. turn_number continues the existing count."
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/leads",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "id",
+                "value": "=eq.{{ $('Parse Nudge').item.json.lead_id }}"
+              }
+            ]
+          },
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ nudged_at: $now.toUTC().toISO() }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "id": "3f2f7b3a-4fc4-4eb2-a512-75d17f1ba70a",
+        "name": "Mark Nudged",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1980,
+          60
+        ],
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "Idempotency guard: nudged_at IS NULL is the candidate filter, so this is what stops the same lead being nudged every hour. Safe against the silence clock only because migration 004 made the leads trigger ignore nudged_at-only writes - without it this PATCH would push updated_at forward and delay the 48h close to 72h."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://YOUR_PROJECT.supabase.co/rest/v1/run_logs",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ workflow_name: '02b - Close Stale Conversations', execution_id: $execution.id, lead_id: $('Parse Nudge').item.json.lead_id, status: ($('Parse Nudge').item.json.nudge_degraded || !$('Send Nudge').item.json.sid) ? 'partial' : 'success', step_name: 'nudge_sent', metadata: { language: $('Parse Nudge').item.json.language, country_code: $('Parse Nudge').item.json.country_code, local_time: $('Parse Nudge').item.json.local_time, silent_since: $('Parse Nudge').item.json.silent_since, turn_count: $('Parse Nudge').item.json.turn_count, nudge_degraded: $('Parse Nudge').item.json.nudge_degraded, twilio_sid: ($('Send Nudge').item.json.sid || null), skipped_quiet_hours: $('Parse Nudge').item.json.skipped_quiet_hours, note: '24h follow-up before the 48h auto-close' } }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "id": "c975423a-8750-4dc6-a164-3e2daa2792df",
+        "name": "Log Nudge Run",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2200,
+          60
+        ],
+        "credentials": {
+          "supabaseApi": {
+            "id": "p3GvX0MPWFrCFb9i",
+            "name": "Supabase account"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "notes": "status=partial when the model degraded to the static template OR Twilio did not return a sid; else success."
+      },
+      {
+        "parameters": {
+          "content": "## Nudge at 24h, close at 48h\n\nThe close branch (below) used to be the whole workflow: a silent lead went straight to `dead` after 48h and **never heard anything** - the conversation just stopped.\n\nThis branch sends ONE Haiku-written follow-up at 24h that references what the lead was actually discussing, then the close branch still closes at 48h if they stay quiet.\n\n**Why the two branches can't collide:** candidates are bounded to `updated_at` between 24h and 48h ago, and the close sweep only takes leads older than 48h. Disjoint sets.\n\n**Why it doesn't nudge twice:** `nudged_at IS NULL` is part of the candidate filter, and `Mark Nudged` sets it. Migration 004 makes the `leads` trigger ignore `nudged_at`-only writes, so marking a nudge does NOT reset the 48h silence clock.\n\n**Quiet hours are respected, weekends are not** - a 24-48h window cannot survive a two-day weekend skip without leads being closed unnudged.",
+          "height": 460,
+          "width": 520,
+          "color": 4
+        },
+        "id": "4383b027-2c9c-4cbd-b49f-d2d2854af761",
+        "name": "Note - nudge before close",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          220,
+          -240
+        ]
       }
     ],
     "connections": {
@@ -164,6 +551,11 @@
           [
             {
               "node": "Close Stale Leads",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Find Nudge Candidates",
               "type": "main",
               "index": 0
             }
@@ -191,6 +583,105 @@
             }
           ]
         ]
+      },
+      "Find Nudge Candidates": {
+        "main": [
+          [
+            {
+              "node": "Load Send Windows",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Send Windows": {
+        "main": [
+          [
+            {
+              "node": "Select Nudgeable Leads",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Select Nudgeable Leads": {
+        "main": [
+          [
+            {
+              "node": "Build Nudge Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Nudge Request": {
+        "main": [
+          [
+            {
+              "node": "Generate Nudge (Haiku)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Generate Nudge (Haiku)": {
+        "main": [
+          [
+            {
+              "node": "Parse Nudge",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse Nudge": {
+        "main": [
+          [
+            {
+              "node": "Send Nudge",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send Nudge": {
+        "main": [
+          [
+            {
+              "node": "Log Nudge Outbound",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log Nudge Outbound": {
+        "main": [
+          [
+            {
+              "node": "Mark Nudged",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mark Nudged": {
+        "main": [
+          [
+            {
+              "node": "Log Nudge Run",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "settings": {
@@ -211,34 +702,6 @@
     "nodeGroups": [],
     "pinData": null,
     "versionId": "436e3df6-ae5b-4755-9909-b2cf23edea46",
-    "activeVersionId": "436e3df6-ae5b-4755-9909-b2cf23edea46",
-    "versionCounter": 4,
-    "triggerCount": 1,
-    "sourceWorkflowId": null,
-    "tags": [],
-    "shared": [
-      {
-        "updatedAt": "2026-07-26T13:10:02.193Z",
-        "createdAt": "2026-07-26T13:10:02.193Z",
-        "role": "workflow:owner",
-        "workflowId": "YuCbQzFpV7yBAuI0",
-        "projectId": "uJ6EDQaWqVXaXtZI",
-        "project": {
-          "updatedAt": "2025-11-10T13:05:51.471Z",
-          "createdAt": "2025-11-10T12:46:35.987Z",
-          "id": "uJ6EDQaWqVXaXtZI",
-          "name": "Hussein Rmaity <hussienremaity@gmail.com>",
-          "type": "personal",
-          "icon": null,
-          "description": null,
-          "customTelemetryTags": [],
-          "creatorId": "937f08f5-776e-4dbd-9f34-a3769190a477"
-        }
-      }
-    ],
-    "versionMetadata": {
-      "name": null,
-      "description": null
-    }
+    "tags": []
   }
 ]
