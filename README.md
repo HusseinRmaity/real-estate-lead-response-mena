@@ -4,9 +4,11 @@ A production-grade **n8n** system that answers real estate leads on **WhatsApp i
 
 Built for MENA agencies (Dubai, Riyadh, Beirut, Cairo, Amman, Doha) that lose leads to slow WhatsApp follow-up. Self-initiated portfolio project — a real, working system, not a mockup.
 
-> **Demo:**
-> ▶️ English walkthrough — `<LOOM_EN_URL>`
-> ▶️ العرض بالعربي — `<LOOM_AR_URL>`
+**Demo — the same live lead, walked through end to end in both languages:**
+
+| English walkthrough | العرض بالعربي |
+|---|---|
+| [![English walkthrough](https://img.youtube.com/vi/OOVjQe0bvBY/mqdefault.jpg)](https://youtu.be/OOVjQe0bvBY) | [![العرض بالعربي](https://img.youtube.com/vi/lS2NAjy52xM/mqdefault.jpg)](https://youtu.be/lS2NAjy52xM) |
 
 ---
 
@@ -44,7 +46,7 @@ A lead arrives from a website form, Property Finder / Bayut / Dubizzle, a Meta l
 │                       deal → Slack #leads → handed_off       │
 └─────────────────────────────────────────────────────────────┘
 
-  02b — Close Stale Conversations   hourly sweep, 48h silence → dead (reopenable 7d)
+  02b — Close Stale Conversations   hourly sweep: nudge at 24h silence, close at 48h (reopenable 7d)
   03 — Daily Digest                 08:00 summary to #leads (volume, tiers, run health)
   99 — Error Handler                global: unhandled crash → run_logs + #automation-errors
   00 — Health Check                 dependency reachability probe
@@ -87,7 +89,7 @@ Model choice is cost-driven: Haiku handles classification and language detection
 |---|---|---|
 | 1 | Error handling | Every external call has an explicit timeout, retry with backoff, and Continue-On-Fail decision (documented per node). |
 | 2 | Validation | Required fields checked at intake; malformed input routes to its own logged branch. |
-| 3 | Idempotency | `dedup_key` (SHA-256) + a UNIQUE constraint + 72h lookback; a duplicate-webhook race collapses to one row. |
+| 3 | Idempotency | Inbound: `dedup_key` (SHA-256) + UNIQUE + 72h lookback on leads, and a partial unique index on `conversations(twilio_message_id)` so a repeated Twilio MessageSid is dropped, not re-answered. Handoff: an atomic `case1_claim_handoff()` claim, so two concurrent messages produce one CRM record, not two. |
 | 4 | Observability | Every execution path writes a `run_logs` row (success / partial / failed) with decision metadata; a daily digest summarizes it. |
 | 5 | Global error workflow | `99 - Error Handler` is attached to every main workflow; crashes log + alert `#automation-errors`. |
 | 6 | Credentials | All in n8n's encrypted store — never in node bodies or URLs. |
@@ -106,7 +108,7 @@ Graceful degradation is deliberate: an AI/Twilio/Slack outage is Continue-On-Fai
 ├── db/                 schema.sql, seed data, migrations
 ├── web/                lead-form.html (demo front door)
 ├── tests/              10 lead payload fixtures
-├── docs/               case study, engineering decisions, testing log
+├── docs/               case study write-up
 └── loom-scripts/       demo scripts (EN + AR)
 ```
 
@@ -116,8 +118,8 @@ Graceful degradation is deliberate: an AI/Twilio/Slack outage is Continue-On-Fai
 
 **Prerequisites:** Docker, a Supabase project, and API access for Anthropic, Twilio (WhatsApp sandbox), HubSpot (private app), and Slack (bot token).
 
-1. **Database** — run `db/schema.sql` then `db/seed-send-windows.sql` in the Supabase SQL editor, then `db/migrations/002_daily_digest_rpc.sql`.
-2. **n8n** — start it (`docker-compose.yml` documents the setup) and import each file in `workflows/`.
+1. **Database** — run `db/schema.sql` then `db/seed-send-windows.sql` in the Supabase SQL editor, then every file in `db/migrations/` in numerical order (002-006).
+2. **n8n** — start it (`docker-compose.yml` documents the setup). Before importing, replace `YOUR_PROJECT.supabase.co` with your own Supabase host in every file in `workflows/` (44 occurrences across the six files — one find-and-replace), then import each file.
 3. **Credentials** — add Supabase, Anthropic, Twilio, HubSpot, and Slack credentials in n8n's credential store; each imported node references them by name.
 4. **Activate** `00`, `01`, `02`, `02b`, `03`, `99`. Wire the Twilio sandbox inbound webhook to `<your-n8n-url>/webhook/whatsapp-inbound`.
 5. **Try it** — open `web/lead-form.html` (set `WEBHOOK_BASE` + `WEBHOOK_TOKEN`), submit a lead, watch WhatsApp.

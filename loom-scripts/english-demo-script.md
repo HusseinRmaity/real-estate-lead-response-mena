@@ -1,4 +1,4 @@
-# Loom script — English demo
+# Demo script — English demo
 
 **Target length:** 2:30–3:30
 **Audience:** MENA real estate agency owners / ops managers, and English-speaking agencies scouting a WhatsApp automation partner.
@@ -6,7 +6,7 @@
 
 **Before you hit record (setup checklist):**
 - [ ] Tunnel running (`cloudflared`), `WEBHOOK_BASE` in `web/lead-form.html` points at it, `WEBHOOK_TOKEN` filled.
-- [ ] Twilio sandbox inbound webhook wired to `<tunnel>/webhook/whatsapp-inbound`; your phone joined the sandbox.
+- [ ] Twilio sandbox inbound webhook wired to `<tunnel>/webhook/whatsapp-inbound-router`; your phone joined the sandbox. (On a standalone install of just this project, point at `<tunnel>/webhook/whatsapp-inbound` instead — the router only exists because one shared Twilio sandbox fronts three separate systems here.)
 - [ ] Test data pruned (run the prune SQL from `docs/testing-log.md` / the M7 handoff).
 - [ ] Windows/tabs open and arranged: (1) the lead form, (2) n8n `01 - Lead Intake` canvas, (3) Supabase `leads` table, (4) HubSpot contacts, (5) Slack `#leads`. Phone screen mirrored or held in frame.
 - [ ] Send-window note: if you're recording during quiet hours (22:00–08:00 local) the ack is delayed by design — record during working hours so it fires immediately, or use a Gulf number during Gulf daytime.

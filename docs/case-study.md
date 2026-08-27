@@ -4,7 +4,7 @@
 **Role:** Sole engineer (architecture, build, testing, hardening).
 **Stack:** n8n · Claude (Haiku 4.5 + Sonnet 5) · Twilio WhatsApp · Supabase · HubSpot · Slack.
 
-> ▶️ **English demo:** `<LOOM_EN_URL>` · ▶️ **العرض بالعربي:** `<LOOM_AR_URL>` · **Code:** [github.com/HusseinRmaity/real-estate-lead-response-mena](https://github.com/HusseinRmaity/real-estate-lead-response-mena)
+> ▶️ **English walkthrough:** https://youtu.be/OOVjQe0bvBY · ▶️ **العرض بالعربي:** https://youtu.be/lS2NAjy52xM · **Code:** [github.com/HusseinRmaity/real-estate-lead-response-mena](https://github.com/HusseinRmaity/real-estate-lead-response-mena)
 
 ---
 
