@@ -3,8 +3,11 @@
   Demo lead-capture form. Posts to the n8n "01 - Lead Intake" webhook.
 
   CONFIG: edit the two constants in the <script> below.
-    WEBHOOK_BASE  - your n8n URL (localhost for local, or the public tunnel URL for the Loom).
+    WEBHOOK_BASE  - your n8n URL (localhost for local, or the public tunnel URL while recording).
     WEBHOOK_TOKEN - the "Lead Intake Webhook Token - Case 1" value.
+    RECORDING_MODE - false posts to the production /webhook/ path (default). Set it
+                     true only while filming, to drive n8n's /webhook-test/ path so
+                     the canvas animates; a test run needs the workflow armed first.
 
   NOTE on the token (demo-acceptable, not production-safe):
     Putting the intake token in client-side JS exposes it to anyone who views source.
@@ -259,10 +262,24 @@
 
 <script>
   // ─── CONFIG ──────────────────────────────────────────────────────────────
-  // Local: "http://localhost:5678"   •   Loom demo: your https://…trycloudflare.com tunnel URL
+  // Local: "http://localhost:5678"   •   Recording: your public tunnel URL (ngrok static domain).
+  // The ngrok-skip-browser-warning header on the fetch below stops ngrok's free-tier
+  // interstitial from intercepting a browser-origin POST.
   const WEBHOOK_BASE  = "http://localhost:5678";
   const WEBHOOK_TOKEN = "REPLACE_WITH_LEAD_INTAKE_TOKEN";
   // ─────────────────────────────────────────────────────────────────────────
+
+  // RECORDING_MODE = true  -> /webhook-test/  : the n8n canvas animates the run
+  //                                              green node-by-node while you record.
+  //                                              Arm it first: open the workflow and click
+  //                                              "Execute workflow". Good for ONE submit,
+  //                                              then re-arm for the next take.
+  // RECORDING_MODE = false -> /webhook/       : normal production run. Works every time,
+  //                                              but the canvas stays static.
+  const RECORDING_MODE = false;
+
+  const WEBHOOK_PATH = RECORDING_MODE ? "/webhook-test/lead-intake" : "/webhook/lead-intake";
+  const WEBHOOK_URL  = WEBHOOK_BASE + WEBHOOK_PATH;
 
   const form = document.getElementById("leadForm");
   const btn = document.getElementById("submitBtn");
@@ -270,6 +287,8 @@
   const errEl = document.getElementById("err");
   const formView = document.getElementById("formView");
   const doneView = document.getElementById("doneView");
+
+  console.log("[lead-form] posting to:", WEBHOOK_URL, RECORDING_MODE ? "(recording mode)" : "");
 
   function splitName(full) {
     const parts = full.trim().split(/\s+/);
@@ -294,11 +313,21 @@
       return showError("Enter a WhatsApp number with country code, e.g. +971 50 123 4567.");
 
     const { first_name, last_name } = splitName(name);
+    // n8n's Validate Required Fields tests strict E.164 (^\+[1-9]\d{7,14}$), so a
+    // number typed the way the placeholder shows it ("+971 50 123 4567") would be
+    // rejected as malformed. Normalise here rather than on the server, so the lead
+    // the workflow sees is already canonical.
+    const phoneE164 = (function (raw) {
+      let p = raw.replace(/[\s\-().]/g, "");
+      if (p.startsWith("00")) p = "+" + p.slice(2);
+      if (!p.startsWith("+")) p = "+" + p;
+      return p;
+    })(phone);
     const payload = {
       source: "website_form",
       source_id: "WF-" + Date.now(),
       first_name, last_name,
-      phone,
+      phone: phoneE164,
       email: email || null,
       buyer_or_seller: intent === "sell" ? "seller" : "buyer",
       property_interest: interest || null,
@@ -309,9 +338,9 @@
     btnText.textContent = "Sending…";
 
     try {
-      const res = await fetch(WEBHOOK_BASE + "/webhook/lead-intake", {
+      const res = await fetch(WEBHOOK_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-webhook-token": WEBHOOK_TOKEN },
+        headers: { "Content-Type": "application/json", "x-webhook-token": WEBHOOK_TOKEN, "ngrok-skip-browser-warning": "true" },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error("HTTP " + res.status);
@@ -322,7 +351,9 @@
     } catch (err) {
       btn.disabled = false;
       btnText.textContent = "Send inquiry";
-      showError("Couldn't send that — check your connection and try again.");
+      showError(RECORDING_MODE
+        ? "Couldn't send that. In recording mode the n8n test webhook must be armed — click “Execute workflow” on the canvas, then submit again."
+        : "Couldn't send that — check your connection and try again.");
     }
   });
 

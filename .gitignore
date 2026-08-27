@@ -5,6 +5,7 @@
 # docs/testing-log.md    internal QA notes + instance references
 # docs/hubspot-setup.md  HubSpot portal IDs + internal setup steps
 # docs/linkedin-posts.md marketing drafts (not repo content)
+# loom-scripts/case1-loom-outreach-cut.md  cold-outreach sales copy, same reason
 # docs/OWNERS-GUIDE.md   internal rate card, client pitch, and build status
 # CLAUDE.md              internal working standards + personal tooling references
 # PLAN.md                internal build playbook (credential IDs, deferred notes)
@@ -16,10 +17,19 @@ docs/decisions.md
 docs/testing-log.md
 docs/hubspot-setup.md
 docs/linkedin-posts.md
+loom-scripts/case1-loom-outreach-cut.md
 docs/OWNERS-GUIDE.md
 CLAUDE.md
 PLAN.md
 case-study-1-mena-spec.md
+
+# ── Demo-only local copies (live token / tunnel URL — never public) ──────────
+# web/lead-form.local.html  real ngrok base + live lead-intake token, RECORDING
+#                           notes; the tracked web/lead-form.html ships with
+#                           placeholders instead.
+# docs/DEMO-CONFIG-REVERT.md  internal ops note (Supabase project ref)
+web/lead-form.local.html
+docs/DEMO-CONFIG-REVERT.md
 
 # ── Secrets (belt-and-suspenders) ────────────────────────────────────────────
 .env
