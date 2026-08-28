@@ -8,7 +8,7 @@ Built for MENA agencies (Dubai, Riyadh, Beirut, Cairo, Amman, Doha) that lose le
 
 | English walkthrough | العرض بالعربي |
 |---|---|
-| [![English walkthrough](https://img.youtube.com/vi/OOVjQe0bvBY/mqdefault.jpg)](https://youtu.be/OOVjQe0bvBY) | [![العرض بالعربي](https://img.youtube.com/vi/lS2NAjy52xM/mqdefault.jpg)](https://youtu.be/lS2NAjy52xM) |
+| [![English walkthrough](https://img.youtube.com/vi/MEebh0leVys/mqdefault.jpg)](https://youtu.be/MEebh0leVys) | [![العرض بالعربي](https://img.youtube.com/vi/lS2NAjy52xM/mqdefault.jpg)](https://youtu.be/lS2NAjy52xM) |
 
 ---
 
