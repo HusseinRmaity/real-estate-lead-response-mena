@@ -118,7 +118,7 @@ Graceful degradation is deliberate: an AI/Twilio/Slack outage is Continue-On-Fai
 
 **Prerequisites:** Docker, a Supabase project, and API access for Anthropic, Twilio (WhatsApp sandbox), HubSpot (private app), and Slack (bot token).
 
-1. **Database** — run `db/schema.sql` then `db/seed-send-windows.sql` in the Supabase SQL editor, then every file in `db/migrations/` in numerical order (002-006).
+1. **Database** — run `db/schema.sql` then `db/seed-send-windows.sql` in the Supabase SQL editor, then every file in `db/migrations/` in numerical order (002-007).
 2. **n8n** — start it (`docker-compose.yml` documents the setup). Before importing, replace `YOUR_PROJECT.supabase.co` with your own Supabase host in every file in `workflows/` (44 occurrences across the six files — one find-and-replace), then import each file.
 3. **Credentials** — add Supabase, Anthropic, Twilio, HubSpot, and Slack credentials in n8n's credential store; each imported node references them by name.
 4. **Activate** `00`, `01`, `02`, `02b`, `03`, `99`. Wire the Twilio sandbox inbound webhook to `<your-n8n-url>/webhook/whatsapp-inbound`.
