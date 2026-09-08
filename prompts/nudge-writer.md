@@ -1,7 +1,12 @@
 ---
-version: 1
-last_updated: 2026-08-21
-change_reason: Initial version. `02b - Close Stale Conversations` previously moved a silent lead straight to `dead` after 48h with no message at all — the lead's last experience was the conversation simply stopping. This prompt writes the single follow-up now sent at 24h.
+version: 2
+last_updated: 2026-08-31
+change_reason: |
+  Reference-only change: the upstream Arabic authority `arabic-style.md` was merged into
+  `arabic-master-reference.md` (work root) on 2026-08-31 and deleted. Citations in this file were
+  remapped to the master's numbering. The system prompt body, the model, and every rule are
+  UNCHANGED — this is a pointer update, not a prompt revision.
+  Previous (v1): Initial version. `02b - Close Stale Conversations` previously moved a silent lead straight to `dead` after 48h with no message at all — the lead's last experience was the conversation simply stopping. This prompt writes the single follow-up now sent at 24h.
 model: claude-haiku-4-5-20251001
 purpose: Write ONE short, context-aware WhatsApp follow-up to a lead who went quiet, before the 48h auto-close
 ---
@@ -110,5 +115,5 @@ Used only when the model call fails or returns nothing (`nudge_degraded: true`).
 
 ⚠ **The Arabic fallback is pending native review.** It is written in Levantine register with
 informal `أنت`, no religious phrasing, and no timing promise — but the register choice should be
-confirmed against `arabic-style.md` before this is treated as final. The model-generated path is
+confirmed against `arabic-master-reference.md` before this is treated as final. The model-generated path is
 the normal case; this string only appears during an Anthropic outage.
